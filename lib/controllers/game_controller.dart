@@ -125,6 +125,13 @@ class GameController extends _$GameController {
     _fireProjectile(0, ability, target);
   }
 
+  void useMeleeAttack() {
+    final player = state.characters.first;
+    final ability = player.abilities.firstWhere((a) => a.name == 'Sword Slash');
+    final target = _getNewPosition(player.logicalPosition, player.facingDirection);
+    _fireProjectile(0, ability, target);
+  }
+
   void _fireProjectile(int characterIndex, Ability ability, Point<int> target) {
     final caster = state.characters[characterIndex];
     final casterPos = caster.logicalPosition;
@@ -137,9 +144,8 @@ class GameController extends _$GameController {
 
     if (distanceToTarget > ability.range) return;
 
-    // Check for walls in line of sight for ranged abilities
     if (ability.range > 1.5 && _hasWallInLineOfSight(casterPos, target)) {
-      return; // Projectile is blocked by a wall
+      return;
     }
 
     final newProjectile = Projectile(
@@ -148,7 +154,7 @@ class GameController extends _$GameController {
       targetCell: target,
       ability: ability,
       startTime: DateTime.now(),
-      travelTime: const Duration(milliseconds: 500),
+      travelTime: const Duration(milliseconds: 50), // Melee attacks are almost instant
     );
 
     final newProjectiles = List<Projectile>.from(state.projectiles)..add(newProjectile);
@@ -160,7 +166,7 @@ class GameController extends _$GameController {
     final newPos = _getNewPosition(player.logicalPosition, direction);
 
     if (!isCellBlocked(newPos.x, newPos.y)) {
-      final newPlayer = player.copyWith(logicalPosition: newPos);
+      final newPlayer = player.copyWith(logicalPosition: newPos, facingDirection: direction);
       final newCharacters = List<GameCharacter>.from(state.characters);
       newCharacters[0] = newPlayer;
       state = state.copyWith(characters: newCharacters);
@@ -202,10 +208,7 @@ class GameController extends _$GameController {
     return !state.grid[y][x].isTraversable;
   }
 
-  /// Performs a line-of-sight check between two points on the grid.
-  /// Returns true if a wall is found between the start and end points (exclusive of start/end).
   bool _hasWallInLineOfSight(Point<int> start, Point<int> end) {
-    // Using a simplified Bresenham's-like line algorithm
     int x0 = start.x;
     int y0 = start.y;
     int x1 = end.x;
@@ -218,7 +221,6 @@ class GameController extends _$GameController {
     int err = dx - dy;
 
     while (true) {
-      // Check if the current cell is a wall (excluding start and end points)
       if (!((x0 == start.x && y0 == start.y) || (x0 == x1 && y0 == y1))) {
         if (isCellBlocked(x0, y0)) {
           return true;
@@ -239,7 +241,6 @@ class GameController extends _$GameController {
     return false;
   }
 
-  /// A test-only method to modify the grid for testing purposes.
   void setCell(int x, int y, {required bool traversable}) {
     final newGrid = state.grid.map((row) => List.of(row)).toList();
     if (y >= 0 && y < newGrid.length && x >= 0 && x < newGrid[y].length) {

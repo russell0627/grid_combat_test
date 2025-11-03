@@ -20,10 +20,11 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Ghost Grid',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+      theme: ThemeData.dark().copyWith(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple, brightness: Brightness.dark),
         useMaterial3: true,
       ),
+      debugShowCheckedModeBanner: false, // Remove debug flag
       home: const GameScreen(),
     );
   }
@@ -32,7 +33,7 @@ class MyApp extends StatelessWidget {
 class GameScreen extends ConsumerStatefulWidget {
   const GameScreen({super.key});
 
-  static const double cellSize = 30.0;
+  static const double cellSize = 40.0; // Increased cell size for a larger play area
 
   @override
   ConsumerState<GameScreen> createState() => _GameScreenState();
@@ -88,7 +89,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         gameController.enterTargetingMode(player.abilities.firstWhere((ability) => ability.name == 'Fireball'));
         return KeyEventResult.handled;
       } else if (event.logicalKey == LogicalKeyboardKey.digit2) {
-        gameController.enterTargetingMode(player.abilities.firstWhere((ability) => ability.name == 'Sword Slash'));
+        gameController.useMeleeAttack();
         return KeyEventResult.handled;
       }
 
@@ -97,7 +98,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         return KeyEventResult.handled;
       }
     }
-    return KeyEventResult.skipRemainingHandlers;
+    return KeyEventResult.skipRemainingHandlers; // Corrected constant
   }
 
   @override
@@ -132,41 +133,6 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         autofocus: true,
         child: Stack(
           children: [
-            // Render the terrain grid
-            Positioned.fill(
-              child: GridView.builder(
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: gameState.grid.isNotEmpty ? gameState.grid[0].length : 1,
-                  childAspectRatio: 1.0,
-                ),
-                itemCount: gameState.grid.length * (gameState.grid.isNotEmpty ? gameState.grid[0].length : 0),
-                itemBuilder: (context, index) {
-                  final y = index ~/ (gameState.grid.isNotEmpty ? gameState.grid[0].length : 1);
-                  final x = index % (gameState.grid.isNotEmpty ? gameState.grid[0].length : 1);
-                  final cell = gameState.grid[y][x];
-
-                  Color color;
-                  switch (cell.terrainType) {
-                    case TerrainType.grass:
-                      color = Colors.green[700]!;
-                      break;
-                    case TerrainType.water:
-                      color = Colors.blue[700]!;
-                      break;
-                    case TerrainType.wall:
-                      color = Colors.brown[700]!;
-                      break;
-                  }
-                  return Container(
-                    decoration: BoxDecoration(
-                      color: color,
-                      border: Border.all(color: Colors.black12, width: 0.5),
-                    ),
-                  );
-                },
-              ),
-            ),
-
             // The main game area (grid, characters, projectiles)
             Center(
               child: Container(
@@ -186,6 +152,37 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
+                      // Render the terrain grid using Positioned widgets
+                      ...List.generate(gameState.grid.length, (y) {
+                        return List.generate(gameState.grid[y].length, (x) {
+                          final cell = gameState.grid[y][x];
+                          Color color;
+                          switch (cell.terrainType) {
+                            case TerrainType.grass:
+                              color = Colors.green[700]!;
+                              break;
+                            case TerrainType.water:
+                              color = Colors.blue[700]!;
+                              break;
+                            case TerrainType.wall:
+                              color = Colors.brown[700]!;
+                              break;
+                          }
+                          return Positioned(
+                            left: x * GameScreen.cellSize,
+                            top: y * GameScreen.cellSize,
+                            width: GameScreen.cellSize,
+                            height: GameScreen.cellSize,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: color,
+                                border: Border.all(color: Colors.black12, width: 0.5),
+                              ),
+                            ),
+                          );
+                        });
+                      }).expand((element) => element).toList(),
+
                       // Render targeting decal
                       if (isTargeting && gameState.targetingPosition != null)
                         Positioned(
@@ -203,33 +200,32 @@ class _GameScreenState extends ConsumerState<GameScreen> {
 
                       // Render characters
                       if (player != null)
-                        ...gameState.characters.asMap().entries.map((entry) {
-                          final character = entry.value;
-                          return AnimatedPositioned(
-                            duration: const Duration(milliseconds: 200),
-                            curve: Curves.easeOut,
-                            left: character.logicalPosition.x * GameScreen.cellSize,
-                            top: character.logicalPosition.y * GameScreen.cellSize,
-                            width: GameScreen.cellSize,
-                            height: GameScreen.cellSize,
-                            child: Container(
-                              color: entry.key == 0 ? Colors.blue : Colors.red,
-                              child: Center(
-                                child: Text(
-                                  '${character.health}',
-                                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                                ),
+                        ...gameState.characters.map((character) => AnimatedPositioned(
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOutQuad,
+                          left: character.logicalPosition.x * GameScreen.cellSize,
+                          top: character.logicalPosition.y * GameScreen.cellSize,
+                          width: GameScreen.cellSize,
+                          height: GameScreen.cellSize,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: character == player ? Colors.blue : Colors.red,
+                            ),
+                            child: Center(
+                              child: Text(
+                                '${character.health}',
+                                style: const TextStyle(color: Colors.white, fontSize: 12),
                               ),
                             ),
-                          );
-                        }),
+                          ),
+                        )),
 
                       // Render projectiles
                       ...gameState.projectiles.map((projectile) {
                         final curvedProgress = Curves.easeOutQuad.transform(DateTime.now().difference(projectile.startTime).inMilliseconds / projectile.travelTime.inMilliseconds);
                         final currentPos = Point(
-                          lerpDouble(projectile.startPosition.x, projectile.endPosition.x, curvedProgress)!,
-                          lerpDouble(projectile.startPosition.y, projectile.endPosition.y, curvedProgress)!
+                          lerpDouble(projectile.startPosition.x, projectile.endPosition.x, curvedProgress) ?? projectile.startPosition.x,
+                          lerpDouble(projectile.startPosition.y, projectile.endPosition.y, curvedProgress) ?? projectile.startPosition.y,
                         );
                         return Positioned(
                           left: currentPos.x - 5, // Center the projectile
@@ -243,9 +239,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                             ),
                           ),
                         );
-                      }),
-                    ],
-                  ),
+                    }),
+                  ]),
                 ),
               ),
             ),
@@ -317,7 +312,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
             if (hasEnemies && player != null)
               ElevatedButton(
                 child: const Text('Sword Slash (2)'),
-                onPressed: () => gameController.enterTargetingMode(player.abilities.firstWhere((ability) => ability.name == 'Sword Slash')),
+                onPressed: () => gameController.useMeleeAttack(),
               ),
           ],
         ),
@@ -329,7 +324,6 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        // Removed Confirm button
         ElevatedButton(
           child: const Text('Cancel'),
           style: ElevatedButton.styleFrom(backgroundColor: Colors.red),

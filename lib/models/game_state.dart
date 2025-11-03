@@ -27,8 +27,8 @@ class GameState {
   });
 
   factory GameState.initial({
-    int width = 20,
-    int height = 20,
+    int width = 30, // Increased from 20
+    int height = 30, // Increased from 20
   }) {
     final random = Random();
     final List<List<GridCell>> initialGrid = List.generate(
