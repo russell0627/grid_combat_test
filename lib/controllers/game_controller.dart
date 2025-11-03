@@ -107,6 +107,40 @@ class GameController extends _$GameController {
     state = state.copyWith(characters: currentCharacters);
   }
 
+  void updateFacingDirection(Point<double> cursorPosition) {
+    final player = state.characters.first;
+    final playerScreenPos = Point(player.logicalPosition.x * GameScreen.cellSize + GameScreen.cellSize / 2, player.logicalPosition.y * GameScreen.cellSize + GameScreen.cellSize / 2);
+
+    final angle = atan2(cursorPosition.y - playerScreenPos.y, cursorPosition.x - playerScreenPos.x);
+    final degrees = angle * 180 / pi;
+
+    Direction newDirection;
+    if (degrees >= -22.5 && degrees < 22.5) {
+      newDirection = Direction.right;
+    } else if (degrees >= 22.5 && degrees < 67.5) {
+      newDirection = Direction.downRight;
+    } else if (degrees >= 67.5 && degrees < 112.5) {
+      newDirection = Direction.down;
+    } else if (degrees >= 112.5 && degrees < 157.5) {
+      newDirection = Direction.downLeft;
+    } else if (degrees >= 157.5 || degrees < -157.5) {
+      newDirection = Direction.left;
+    } else if (degrees >= -157.5 && degrees < -112.5) {
+      newDirection = Direction.upLeft;
+    } else if (degrees >= -112.5 && degrees < -67.5) {
+      newDirection = Direction.up;
+    } else { // -67.5 to -22.5
+      newDirection = Direction.upRight;
+    }
+
+    if (player.facingDirection != newDirection) {
+      final newPlayer = player.copyWith(facingDirection: newDirection);
+      final newCharacters = List<GameCharacter>.from(state.characters);
+      newCharacters[0] = newPlayer;
+      state = state.copyWith(characters: newCharacters);
+    }
+  }
+
   void enterTargetingMode(Ability ability) {
     state = state.copyWith(targetingAbility: ability, clearPending: true);
   }
@@ -166,7 +200,8 @@ class GameController extends _$GameController {
     final newPos = _getNewPosition(player.logicalPosition, direction);
 
     if (!isCellBlocked(newPos.x, newPos.y)) {
-      final newPlayer = player.copyWith(logicalPosition: newPos, facingDirection: direction);
+      // No longer update facing direction on move
+      final newPlayer = player.copyWith(logicalPosition: newPos);
       final newCharacters = List<GameCharacter>.from(state.characters);
       newCharacters[0] = newPlayer;
       state = state.copyWith(characters: newCharacters);

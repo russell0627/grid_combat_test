@@ -141,106 +141,111 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.grey, width: 2.0),
                 ),
-                child: GestureDetector(
-                  onTapDown: (details) {
-                    if (!isTargeting) return;
-                    final tapPos = details.localPosition;
-                    final gridX = (tapPos.dx / GameScreen.cellSize).floor();
-                    final gridY = (tapPos.dy / GameScreen.cellSize).floor();
-                    gameController.setTargetPosition(Point(gridX, gridY));
+                child: MouseRegion(
+                  onHover: (event) {
+                    gameController.updateFacingDirection(Point(event.localPosition.dx, event.localPosition.dy));
                   },
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // Render the terrain grid using Positioned widgets
-                      ...List.generate(gameState.grid.length, (y) {
-                        return List.generate(gameState.grid[y].length, (x) {
-                          final cell = gameState.grid[y][x];
-                          Color color;
-                          switch (cell.terrainType) {
-                            case TerrainType.grass:
-                              color = Colors.green[700]!;
-                              break;
-                            case TerrainType.water:
-                              color = Colors.blue[700]!;
-                              break;
-                            case TerrainType.wall:
-                              color = Colors.brown[700]!;
-                              break;
-                          }
-                          return Positioned(
-                            left: x * GameScreen.cellSize,
-                            top: y * GameScreen.cellSize,
+                  child: GestureDetector(
+                    onTapDown: (details) {
+                      if (!isTargeting) return;
+                      final tapPos = details.localPosition;
+                      final gridX = (tapPos.dx / GameScreen.cellSize).floor();
+                      final gridY = (tapPos.dy / GameScreen.cellSize).floor();
+                      gameController.setTargetPosition(Point(gridX, gridY));
+                    },
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // Render the terrain grid using Positioned widgets
+                        ...List.generate(gameState.grid.length, (y) {
+                          return List.generate(gameState.grid[y].length, (x) {
+                            final cell = gameState.grid[y][x];
+                            Color color;
+                            switch (cell.terrainType) {
+                              case TerrainType.grass:
+                                color = Colors.green[700]!;
+                                break;
+                              case TerrainType.water:
+                                color = Colors.blue[700]!;
+                                break;
+                              case TerrainType.wall:
+                                color = Colors.brown[700]!;
+                                break;
+                            }
+                            return Positioned(
+                              left: x * GameScreen.cellSize,
+                              top: y * GameScreen.cellSize,
+                              width: GameScreen.cellSize,
+                              height: GameScreen.cellSize,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  border: Border.all(color: Colors.black12, width: 0.5),
+                                ),
+                              ),
+                            );
+                          });
+                        }).expand((element) => element).toList(),
+
+                        // Render targeting decal
+                        if (isTargeting && gameState.targetingPosition != null)
+                          Positioned(
+                            left: gameState.targetingPosition!.x * GameScreen.cellSize,
+                            top: gameState.targetingPosition!.y * GameScreen.cellSize,
                             width: GameScreen.cellSize,
                             height: GameScreen.cellSize,
                             child: Container(
                               decoration: BoxDecoration(
-                                color: color,
-                                border: Border.all(color: Colors.black12, width: 0.5),
+                                color: Colors.yellow.withOpacity(0.5),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+
+                        // Render characters
+                        if (player != null)
+                          ...gameState.characters.map((character) => AnimatedPositioned(
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.easeOutQuad,
+                            left: character.logicalPosition.x * GameScreen.cellSize,
+                            top: character.logicalPosition.y * GameScreen.cellSize,
+                            width: GameScreen.cellSize,
+                            height: GameScreen.cellSize,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: character == player ? Colors.blue : Colors.red,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${character.health}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                                ),
+                              ),
+                            ),
+                          )),
+
+                        // Render projectiles
+                        ...gameState.projectiles.map((projectile) {
+                          final curvedProgress = Curves.easeOutQuad.transform(DateTime.now().difference(projectile.startTime).inMilliseconds / projectile.travelTime.inMilliseconds);
+                          final currentPos = Point(
+                            lerpDouble(projectile.startPosition.x, projectile.endPosition.x, curvedProgress) ?? projectile.startPosition.x,
+                            lerpDouble(projectile.startPosition.y, projectile.endPosition.y, curvedProgress) ?? projectile.startPosition.y,
+                          );
+                          return Positioned(
+                            left: currentPos.x - 5, // Center the projectile
+                            top: currentPos.y - 5,
+                            width: 10,
+                            height: 10,
+                            child: Container(
+                              decoration: const BoxDecoration(
+                                color: Colors.orange,
+                                shape: BoxShape.circle,
                               ),
                             ),
                           );
-                        });
-                      }).expand((element) => element).toList(),
-
-                      // Render targeting decal
-                      if (isTargeting && gameState.targetingPosition != null)
-                        Positioned(
-                          left: gameState.targetingPosition!.x * GameScreen.cellSize,
-                          top: gameState.targetingPosition!.y * GameScreen.cellSize,
-                          width: GameScreen.cellSize,
-                          height: GameScreen.cellSize,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.yellow.withOpacity(0.5),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-
-                      // Render characters
-                      if (player != null)
-                        ...gameState.characters.map((character) => AnimatedPositioned(
-                          duration: const Duration(milliseconds: 200),
-                          curve: Curves.easeOutQuad,
-                          left: character.logicalPosition.x * GameScreen.cellSize,
-                          top: character.logicalPosition.y * GameScreen.cellSize,
-                          width: GameScreen.cellSize,
-                          height: GameScreen.cellSize,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: character == player ? Colors.blue : Colors.red,
-                            ),
-                            child: Center(
-                              child: Text(
-                                '${character.health}',
-                                style: const TextStyle(color: Colors.white, fontSize: 12),
-                              ),
-                            ),
-                          ),
-                        )),
-
-                      // Render projectiles
-                      ...gameState.projectiles.map((projectile) {
-                        final curvedProgress = Curves.easeOutQuad.transform(DateTime.now().difference(projectile.startTime).inMilliseconds / projectile.travelTime.inMilliseconds);
-                        final currentPos = Point(
-                          lerpDouble(projectile.startPosition.x, projectile.endPosition.x, curvedProgress) ?? projectile.startPosition.x,
-                          lerpDouble(projectile.startPosition.y, projectile.endPosition.y, curvedProgress) ?? projectile.startPosition.y,
-                        );
-                        return Positioned(
-                          left: currentPos.x - 5, // Center the projectile
-                          top: currentPos.y - 5,
-                          width: 10,
-                          height: 10,
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              color: Colors.orange,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        );
-                    }),
-                  ]),
+                      }),
+                    ]),
+                  ),
                 ),
               ),
             ),
