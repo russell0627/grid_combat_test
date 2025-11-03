@@ -81,8 +81,7 @@ class GameController extends _$GameController {
 
     for (int i = 1; i < currentCharacters.length; i++) {
       final enemy = currentCharacters[i];
-      final enemyPos = enemy.logicalPosition;
-      final distanceToPlayer = sqrt(pow(playerPos.x - enemyPos.x, 2) + pow(playerPos.y - enemyPos.y, 2));
+      final distanceToPlayer = sqrt(pow(playerPos.x - enemy.logicalPosition.x, 2) + pow(playerPos.y - enemy.logicalPosition.y, 2));
       final enemyAbility = enemy.abilities.first;
 
       if (distanceToPlayer <= enemyAbility.range) {
@@ -92,7 +91,7 @@ class GameController extends _$GameController {
         double minDistance = double.infinity;
 
         for (var direction in Direction.values) {
-          final newPos = _getNewPosition(enemyPos, direction);
+          final newPos = _getNewPosition(enemy.logicalPosition, direction);
           if (isCellBlocked(newPos.x, newPos.y)) continue;
 
           final distance = sqrt(pow(playerPos.x - newPos.x, 2) + pow(playerPos.y - newPos.y, 2));
@@ -101,7 +100,7 @@ class GameController extends _$GameController {
             bestDirection = direction;
           }
         }
-        final finalPos = _getNewPosition(enemyPos, bestDirection);
+        final finalPos = _getNewPosition(enemy.logicalPosition, bestDirection);
         currentCharacters[i] = enemy.copyWith(logicalPosition: finalPos);
       }
     }
@@ -114,14 +113,8 @@ class GameController extends _$GameController {
 
   void setTargetPosition(Point<int> position) {
     if (state.targetingAbility == null) return;
-    state = state.copyWith(targetingPosition: position);
-  }
-
-  void confirmTarget() {
-    if (state.targetingAbility != null && state.targetingPosition != null) {
-      usePlayerAbility(state.targetingAbility!, state.targetingPosition!);
-      state = state.copyWith(clearTargeting: true);
-    }
+    usePlayerAbility(state.targetingAbility!, position);
+    state = state.copyWith(clearTargeting: true);
   }
 
   void cancelTargeting() {
@@ -144,6 +137,11 @@ class GameController extends _$GameController {
 
     if (distanceToTarget > ability.range) return;
 
+    // Check for walls in line of sight for ranged abilities
+    if (ability.range > 1.5 && _hasWallInLineOfSight(casterPos, target)) {
+      return; // Projectile is blocked by a wall
+    }
+
     final newProjectile = Projectile(
       startPosition: Point(casterPos.x * GameScreen.cellSize + GameScreen.cellSize / 2, casterPos.y * GameScreen.cellSize + GameScreen.cellSize / 2),
       endPosition: Point(target.x * GameScreen.cellSize + GameScreen.cellSize / 2, target.y * GameScreen.cellSize + GameScreen.cellSize / 2),
@@ -154,7 +152,7 @@ class GameController extends _$GameController {
     );
 
     final newProjectiles = List<Projectile>.from(state.projectiles)..add(newProjectile);
-    state = state.copyWith(projectiles: newProjectiles, clearPending: true);
+    state = state.copyWith(characters: state.characters, projectiles: newProjectiles, clearPending: true);
   }
 
   void movePlayer(Direction direction) {
@@ -204,11 +202,48 @@ class GameController extends _$GameController {
     return !state.grid[y][x].isTraversable;
   }
 
+  /// Performs a line-of-sight check between two points on the grid.
+  /// Returns true if a wall is found between the start and end points (exclusive of start/end).
+  bool _hasWallInLineOfSight(Point<int> start, Point<int> end) {
+    // Using a simplified Bresenham's-like line algorithm
+    int x0 = start.x;
+    int y0 = start.y;
+    int x1 = end.x;
+    int y1 = end.y;
+
+    int dx = (x1 - x0).abs();
+    int dy = (y1 - y0).abs();
+    int sx = (x0 < x1) ? 1 : -1;
+    int sy = (y0 < y1) ? 1 : -1;
+    int err = dx - dy;
+
+    while (true) {
+      // Check if the current cell is a wall (excluding start and end points)
+      if (!((x0 == start.x && y0 == start.y) || (x0 == x1 && y0 == y1))) {
+        if (isCellBlocked(x0, y0)) {
+          return true;
+        }
+      }
+
+      if (x0 == x1 && y0 == y1) break;
+      int e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x0 += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y0 += sy;
+      }
+    }
+    return false;
+  }
+
   /// A test-only method to modify the grid for testing purposes.
   void setCell(int x, int y, {required bool traversable}) {
     final newGrid = state.grid.map((row) => List.of(row)).toList();
     if (y >= 0 && y < newGrid.length && x >= 0 && x < newGrid[y].length) {
-      newGrid[y][x] = GridCell(isTraversable: traversable);
+      newGrid[y][x] = GridCell(terrainType: traversable ? TerrainType.grass : TerrainType.wall);
       state = state.copyWith(grid: newGrid);
     }
   }

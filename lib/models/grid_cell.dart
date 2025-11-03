@@ -1,14 +1,25 @@
+/// Defines different types of terrain a grid cell can have.
+enum TerrainType {
+  grass,
+  water,
+  wall,
+  // Add more terrain types as needed
+}
+
 /// Represents a single cell in the game's logical grid.
 class GridCell {
-  final bool isTraversable;
+  final TerrainType terrainType;
 
-  GridCell({this.isTraversable = true});
+  GridCell({this.terrainType = TerrainType.grass});
+
+  /// Determines if the cell can be moved into.
+  bool get isTraversable => terrainType != TerrainType.wall;
 
   GridCell copyWith({
-    bool? isTraversable,
+    TerrainType? terrainType,
   }) {
     return GridCell(
-      isTraversable: isTraversable ?? this.isTraversable,
+      terrainType: terrainType ?? this.terrainType,
     );
   }
 }

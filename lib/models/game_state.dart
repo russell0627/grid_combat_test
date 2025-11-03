@@ -30,14 +30,71 @@ class GameState {
     int width = 20,
     int height = 20,
   }) {
+    final random = Random();
+    final List<List<GridCell>> initialGrid = List.generate(
+      height,
+      (_) => List.generate(width, (_) => GridCell(terrainType: TerrainType.grass)),
+    );
+
+    // --- Generate Water Rivers ---
+    int numRivers = random.nextInt(3) + 1; // 1 to 3 rivers
+    for (int r = 0; r < numRivers; r++) {
+      int startX = random.nextInt(width);
+      int startY = random.nextInt(height);
+      bool horizontal = random.nextBool(); // Decide if river starts horizontally or vertically
+
+      int currentX = startX;
+      int currentY = startY;
+
+      for (int i = 0; i < (horizontal ? width : height); i++) {
+        if (currentX >= 0 && currentX < width && currentY >= 0 && currentY < height) {
+          initialGrid[currentY][currentX] = GridCell(terrainType: TerrainType.water);
+          // Add some width to the river
+          if (currentX + 1 < width) initialGrid[currentY][currentX + 1] = GridCell(terrainType: TerrainType.water);
+          if (currentY + 1 < height) initialGrid[currentY + 1][currentX] = GridCell(terrainType: TerrainType.water);
+        }
+
+        // Move generally straight, with a slight chance to drift
+        if (horizontal) {
+          currentX++;
+          if (random.nextDouble() < 0.3) currentY += (random.nextBool() ? 1 : -1); // Drift up/down
+        } else {
+          currentY++;
+          if (random.nextDouble() < 0.3) currentX += (random.nextBool() ? 1 : -1); // Drift left/right
+        }
+      }
+    }
+
+    // --- Generate Walls ---
+    // Ensure walls don't block initial character positions
+    final playerInitialPos = const Point<int>(5, 5);
+    final enemyInitialPos = const Point<int>(8, 8);
+
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        // Avoid placing walls on initial character spawn points
+        if ((x == playerInitialPos.x && y == playerInitialPos.y) ||
+            (x == enemyInitialPos.x && y == enemyInitialPos.y)) {
+          continue;
+        }
+        // Avoid placing walls on water
+        if (initialGrid[y][x].terrainType == TerrainType.water) {
+          continue;
+        }
+
+        // Low probability for walls
+        if (random.nextDouble() < 0.05) { // 5% chance for a wall
+          initialGrid[y][x] = GridCell(terrainType: TerrainType.wall);
+        }
+      }
+    }
+
     return GameState(
-      grid: List.generate(
-        height,
-        (_) => List.generate(width, (_) => GridCell()),
-      ),
+      grid: initialGrid,
       characters: [
+        // Player
         GameCharacter(
-          logicalPosition: const Point(5, 5),
+          logicalPosition: playerInitialPos,
           abilities: const [
             Ability(
               name: 'Fireball',
@@ -45,10 +102,17 @@ class GameState {
               aoeRadius: 2.5,
               damage: 25,
             ),
+            Ability(
+              name: 'Sword Slash',
+              range: 1.5,
+              aoeRadius: 0.5,
+              damage: 15,
+            ),
           ],
         ),
+        // Enemy
         GameCharacter(
-          logicalPosition: const Point(8, 8),
+          logicalPosition: enemyInitialPos,
           abilities: const [
             Ability(
               name: 'Claw',
