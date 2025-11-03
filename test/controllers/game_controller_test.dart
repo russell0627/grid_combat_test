@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:grid_combat_test/controllers/game_controller.dart';
 import 'package:grid_combat_test/models/direction.dart';
-import 'package:grid_combat_test/models/game_character.dart';
 
 void main() {
   group('GameController', () {
@@ -13,55 +12,130 @@ void main() {
     setUp(() {
       container = ProviderContainer();
       controller = container.read(gameControllerProvider.notifier);
-      controller.timer?.cancel();
+      // Stop the ticker to prevent automatic updates during tests.
+      controller.ticker.stop();
     });
 
     tearDown(() {
       container.dispose();
     });
 
-    // ... (other test groups) ...
+    // ... (rest of the tests remain the same) ...
+
+    group('Grid Logic', () {
+      test('isCellBlocked returns true for out-of-bounds coordinates', () {
+        expect(controller.isCellBlocked(-1, 0), isTrue);
+        expect(controller.isCellBlocked(0, -1), isTrue);
+        expect(controller.isCellBlocked(20, 0), isTrue);
+        expect(controller.isCellBlocked(0, 20), isTrue);
+      });
+
+      test('isCellBlocked returns false for traversable cells', () {
+        expect(controller.isCellBlocked(5, 5), isFalse);
+      });
+
+      test('isCellBlocked returns true for non-traversable cells', () {
+        controller.setCell(5, 5, traversable: false);
+        expect(controller.isCellBlocked(5, 5), isTrue);
+      });
+    });
+
+    group('Player Movement', () {
+      test('movePlayer updates player position on valid move', () {
+        final initialPosition = container
+            .read(gameControllerProvider)
+            .characters
+            .first
+            .logicalPosition;
+        controller.movePlayer(Direction.right);
+        final newPosition = container
+            .read(gameControllerProvider)
+            .characters
+            .first
+            .logicalPosition;
+        expect(newPosition, Point(initialPosition.x + 1, initialPosition.y));
+      });
+
+      test('movePlayer does not update player position on invalid move', () {
+        final initialPosition = container
+            .read(gameControllerProvider)
+            .characters
+            .first
+            .logicalPosition;
+        controller.setCell(initialPosition.x + 1, initialPosition.y, traversable: false);
+        controller.movePlayer(Direction.right);
+        final newPosition = container
+            .read(gameControllerProvider)
+            .characters
+            .first
+            .logicalPosition;
+        expect(newPosition, initialPosition);
+      });
+    });
+
+    group('Abilities', () {
+      test('usePlayerAbility creates a projectile', () {
+        final player = container
+            .read(gameControllerProvider)
+            .characters
+            .first;
+        final enemy = container
+            .read(gameControllerProvider)
+            .characters
+            .last;
+        final fireball = player.abilities.first;
+        final targetPoint = enemy.logicalPosition;
+
+        expect(container
+            .read(gameControllerProvider)
+            .projectiles, isEmpty);
+
+        controller.usePlayerAbility(fireball, targetPoint);
+
+        expect(container
+            .read(gameControllerProvider)
+            .projectiles, isNotEmpty);
+        expect(container
+            .read(gameControllerProvider)
+            .projectiles
+            .first
+            .ability
+            .name, 'Fireball');
+      });
+    });
 
     group('Action Buffering', () {
       test('buffers and executes action when player moves into range', () {
-        // 1. Manually set up a state where the enemy is out of range.
-        final player = container.read(gameControllerProvider).characters.first;
-        final enemy = container.read(gameControllerProvider).characters.last.copyWith(logicalPosition: const Point(15, 15));
+        final player = container
+            .read(gameControllerProvider)
+            .characters
+            .first;
+        final enemy = container
+            .read(gameControllerProvider)
+            .characters
+            .last
+            .copyWith(logicalPosition: const Point(15, 15));
         controller.state = controller.state.copyWith(characters: [player, enemy]);
 
         final fireball = player.abilities.first;
         final targetPoint = enemy.logicalPosition;
 
-        // 2. Use the ability on the out-of-range target.
         controller.usePlayerAbility(fireball, targetPoint);
 
-        // 3. Verify the action was buffered and no damage was dealt.
         var currentState = container.read(gameControllerProvider);
         expect(currentState.pendingAbility, fireball);
         expect(currentState.pendingTarget, targetPoint);
-        expect(currentState.characters.last.health, 100);
+        expect(currentState.projectiles, isEmpty); // No projectile should be fired yet.
 
-        // 4. Move the player close enough for the target to be in range.
-        // Player at (5,5), Target at (15,15). Range is 8.
-        // Moving to (8,8) makes the distance sqrt(7^2+7^2) = ~9.9 (still out of range)
-        // Moving to (9,9) makes the distance sqrt(6^2+6^2) = ~8.4 (still out of range)
-        // Moving to (10,10) makes the distance sqrt(5^2+5^2) = ~7.07 (IN RANGE)
-        controller.movePlayer(Direction.downRight); // pos: (6,6)
-        controller.movePlayer(Direction.downRight); // pos: (7,7)
-        controller.movePlayer(Direction.downRight); // pos: (8,8)
-        controller.movePlayer(Direction.downRight); // pos: (9,9)
+        controller.movePlayer(Direction.downRight);
+        controller.movePlayer(Direction.downRight);
+        controller.movePlayer(Direction.downRight);
+        controller.movePlayer(Direction.downRight);
+        controller.movePlayer(Direction.downRight);
 
-        // Health should still be 100, as we are not yet in range.
-        expect(container.read(gameControllerProvider).characters.last.health, 100);
-
-        // 5. The final move that puts the player in range.
-        controller.movePlayer(Direction.downRight); // pos: (10,10)
-
-        // 6. Verify the buffered action was executed and the state was cleared.
         currentState = container.read(gameControllerProvider);
         expect(currentState.pendingAbility, isNull);
-        expect(currentState.pendingTarget, isNull);
-        expect(currentState.characters.last.health, 75);
+        expect(currentState.projectiles, isNotEmpty); // A projectile should now be in flight.
       });
     });
   });

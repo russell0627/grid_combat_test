@@ -1,36 +1,83 @@
 import 'dart:async';
 import 'dart:math';
-
+import 'package:flutter/scheduler.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../models/ability.dart';
 import '../models/direction.dart';
 import '../models/game_character.dart';
 import '../models/game_state.dart';
 import '../models/grid_cell.dart';
+import '../models/projectile.dart';
+import '../main.dart'; // For cellSize
 
 part 'game_controller.g.dart';
 
 @riverpod
 class GameController extends _$GameController {
-  Timer? timer;
+  late final Ticker ticker;
+  DateTime _lastAiUpdateTime = DateTime.now();
 
   @override
   GameState build() {
-    _startUpdateLoop();
-    ref.onDispose(() => timer?.cancel());
+    ticker = Ticker(_onTick);
+    ticker.start();
+    ref.onDispose(() => ticker.dispose());
     return GameState.initial();
   }
 
-  void _startUpdateLoop() {
-    timer = Timer.periodic(const Duration(seconds: 1), (_) => update());
+  void _onTick(Duration elapsed) {
+    _updateProjectiles();
+    _updateAI();
   }
 
-  void update() {
+  void _updateProjectiles() {
+    if (state.projectiles.isEmpty) return;
+
+    final now = DateTime.now();
+    final List<Projectile> remainingProjectiles = [];
+    final List<Projectile> arrivedProjectiles = [];
+
+    for (final projectile in state.projectiles) {
+      final progress = now.difference(projectile.startTime).inMilliseconds / projectile.travelTime.inMilliseconds;
+      if (progress >= 1.0) {
+        arrivedProjectiles.add(projectile);
+      } else {
+        remainingProjectiles.add(projectile);
+      }
+    }
+
+    if (arrivedProjectiles.isNotEmpty) {
+      _applyProjectileEffects(arrivedProjectiles);
+      state = state.copyWith(projectiles: remainingProjectiles);
+    }
+  }
+
+  void _applyProjectileEffects(List<Projectile> projectiles) {
+    var currentCharacters = List<GameCharacter>.from(state.characters);
+    for (final projectile in projectiles) {
+      currentCharacters = currentCharacters.map((char) {
+        final distanceToChar = sqrt(pow(projectile.targetCell.x - char.logicalPosition.x, 2) + pow(projectile.targetCell.y - char.logicalPosition.y, 2));
+        if (distanceToChar <= projectile.ability.aoeRadius) {
+          final newHealth = char.health - projectile.ability.damage;
+          return char.copyWith(health: newHealth > 0 ? newHealth : 0);
+        }
+        return char;
+      }).toList();
+    }
+    currentCharacters.removeWhere((char) => char.health <= 0);
+    state = state.copyWith(characters: currentCharacters);
+  }
+
+  void _updateAI() {
+    final now = DateTime.now();
+    if (now.difference(_lastAiUpdateTime).inSeconds < 1) return;
+    _lastAiUpdateTime = now;
+
     if (state.characters.length <= 1) return;
 
     final player = state.characters.first;
     final playerPos = player.logicalPosition;
-    final currentCharacters = List<GameCharacter>.from(state.characters);
+    var currentCharacters = List<GameCharacter>.from(state.characters);
 
     for (int i = 1; i < currentCharacters.length; i++) {
       final enemy = currentCharacters[i];
@@ -39,8 +86,7 @@ class GameController extends _$GameController {
       final enemyAbility = enemy.abilities.first;
 
       if (distanceToPlayer <= enemyAbility.range) {
-        _useAbility(i, enemyAbility, playerPos);
-        return;
+        _fireProjectile(i, enemyAbility, playerPos);
       } else {
         Direction bestDirection = Direction.up;
         double minDistance = double.infinity;
@@ -82,36 +128,33 @@ class GameController extends _$GameController {
     state = state.copyWith(clearTargeting: true, clearPending: true);
   }
 
-  void usePlayerAbility(Ability ability, Point target) {
-    _useAbility(0, ability, target);
+  void usePlayerAbility(Ability ability, Point<int> target) {
+    _fireProjectile(0, ability, target);
   }
 
-  void _useAbility(int characterIndex, Ability ability, Point target) {
+  void _fireProjectile(int characterIndex, Ability ability, Point<int> target) {
     final caster = state.characters[characterIndex];
     final casterPos = caster.logicalPosition;
-
     final distanceToTarget = sqrt(pow(casterPos.x - target.x, 2) + pow(casterPos.y - target.y, 2));
 
-    // If the caster is the player and is out of range, buffer the action.
     if (characterIndex == 0 && distanceToTarget > ability.range) {
-      state = state.copyWith(pendingAbility: ability, pendingTarget: target as Point<int>?);
+      state = state.copyWith(pendingAbility: ability, pendingTarget: target);
       return;
     }
 
-    if (distanceToTarget > ability.range) return; // For AI, just exit if out of range.
+    if (distanceToTarget > ability.range) return;
 
-    var updatedCharacters = state.characters.map((char) {
-      final distanceToChar = sqrt(pow(target.x - char.logicalPosition.x, 2) + pow(target.y - char.logicalPosition.y, 2));
-      if (distanceToChar <= ability.aoeRadius) {
-        final newHealth = char.health - ability.damage;
-        return char.copyWith(health: newHealth > 0 ? newHealth : 0);
-      }
-      return char;
-    }).toList();
+    final newProjectile = Projectile(
+      startPosition: Point(casterPos.x * GameScreen.cellSize + GameScreen.cellSize / 2, casterPos.y * GameScreen.cellSize + GameScreen.cellSize / 2),
+      endPosition: Point(target.x * GameScreen.cellSize + GameScreen.cellSize / 2, target.y * GameScreen.cellSize + GameScreen.cellSize / 2),
+      targetCell: target,
+      ability: ability,
+      startTime: DateTime.now(),
+      travelTime: const Duration(milliseconds: 500),
+    );
 
-    updatedCharacters.removeWhere((char) => char.health <= 0);
-    // Clear any pending action after it's successfully used.
-    state = state.copyWith(characters: updatedCharacters, clearPending: true);
+    final newProjectiles = List<Projectile>.from(state.projectiles)..add(newProjectile);
+    state = state.copyWith(projectiles: newProjectiles, clearPending: true);
   }
 
   void movePlayer(Direction direction) {
@@ -124,7 +167,6 @@ class GameController extends _$GameController {
       newCharacters[0] = newPlayer;
       state = state.copyWith(characters: newCharacters);
 
-      // After moving, check if a buffered action can be executed.
       _checkAndExecutePendingAction();
     }
   }
@@ -137,8 +179,7 @@ class GameController extends _$GameController {
       final distanceToTarget = sqrt(pow(player.logicalPosition.x - target.x, 2) + pow(player.logicalPosition.y - target.y, 2));
 
       if (distanceToTarget <= ability.range) {
-        _useAbility(0, ability, target);
-        // The _useAbility method now clears the pending state.
+        _fireProjectile(0, ability, target);
       }
     }
   }
@@ -163,6 +204,7 @@ class GameController extends _$GameController {
     return !state.grid[y][x].isTraversable;
   }
 
+  /// A test-only method to modify the grid for testing purposes.
   void setCell(int x, int y, {required bool traversable}) {
     final newGrid = state.grid.map((row) => List.of(row)).toList();
     if (y >= 0 && y < newGrid.length && x >= 0 && x < newGrid[y].length) {

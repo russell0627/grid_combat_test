@@ -2,30 +2,30 @@ import 'dart:math';
 import './ability.dart';
 import './grid_cell.dart';
 import './game_character.dart';
+import './projectile.dart';
 
 /// Represents the entire state of the game at a single point in time.
 class GameState {
   final List<List<GridCell>> grid;
   final List<GameCharacter> characters;
+  final List<Projectile> projectiles;
 
-  // State for the "Projected Decal" targeting mode
+  // State for targeting and buffering
   final Ability? targetingAbility;
   final Point<int>? targetingPosition;
-
-  // State for "Buffered Actions"
   final Ability? pendingAbility;
   final Point<int>? pendingTarget;
 
   GameState({
     required this.grid,
     required this.characters,
+    this.projectiles = const [],
     this.targetingAbility,
     this.targetingPosition,
     this.pendingAbility,
     this.pendingTarget,
   });
 
-  // A factory constructor for the initial state of the game.
   factory GameState.initial({
     int width = 20,
     int height = 20,
@@ -36,7 +36,6 @@ class GameState {
         (_) => List.generate(width, (_) => GridCell()),
       ),
       characters: [
-        // Player
         GameCharacter(
           logicalPosition: const Point(5, 5),
           abilities: const [
@@ -48,7 +47,6 @@ class GameState {
             ),
           ],
         ),
-        // Enemy
         GameCharacter(
           logicalPosition: const Point(8, 8),
           abilities: const [
@@ -67,6 +65,7 @@ class GameState {
   GameState copyWith({
     List<List<GridCell>>? grid,
     List<GameCharacter>? characters,
+    List<Projectile>? projectiles,
     Ability? targetingAbility,
     Point<int>? targetingPosition,
     bool clearTargeting = false,
@@ -77,6 +76,7 @@ class GameState {
     return GameState(
       grid: grid ?? this.grid,
       characters: characters ?? this.characters,
+      projectiles: projectiles ?? this.projectiles,
       targetingAbility:
           clearTargeting ? null : targetingAbility ?? this.targetingAbility,
       targetingPosition:
