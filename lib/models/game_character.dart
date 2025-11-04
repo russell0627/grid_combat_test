@@ -8,6 +8,7 @@ import './status_effect.dart';
 /// Represents a character in the game, like the player or an enemy.
 class GameCharacter {
   final Point<int> logicalPosition;
+  final Point<int> size;
   final int health;
   final int maxHealth;
   final int mana;
@@ -19,6 +20,7 @@ class GameCharacter {
 
   GameCharacter({
     required this.logicalPosition,
+    this.size = const Point(1, 1), // Default size is 1x1
     this.health = 100,
     this.maxHealth = 100,
     this.mana = 50,
@@ -33,6 +35,7 @@ class GameCharacter {
 
   GameCharacter copyWith({
     Point<int>? logicalPosition,
+    Point<int>? size,
     int? health,
     int? maxHealth,
     int? mana,
@@ -44,6 +47,7 @@ class GameCharacter {
   }) {
     return GameCharacter(
       logicalPosition: logicalPosition ?? this.logicalPosition,
+      size: size ?? this.size,
       health: health ?? this.health,
       maxHealth: maxHealth ?? this.maxHealth,
       mana: mana ?? this.mana,

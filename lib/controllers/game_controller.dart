@@ -39,6 +39,19 @@ class GameController extends _$GameController {
     _checkWinCondition();
   }
 
+  // --- Debug Methods ---
+  void toggleDebugMenu() {
+    state = state.copyWith(isDebugMenuOpen: !state.isDebugMenuOpen);
+  }
+
+  void skipLevel() {
+    if (state.currentLevelIndex < GameLevel.allLevels.length - 1) {
+      state = GameState.initial(currentLevelIndex: state.currentLevelIndex + 1);
+    } else {
+      state = GameState.initial(currentLevelIndex: 0); // Loop back to first level
+    }
+  }
+
   void _handleContinuousMovement() {
     if (state.activeMoveDirections.isEmpty) return;
 
@@ -124,14 +137,19 @@ class GameController extends _$GameController {
     var currentCharacters = List<GameCharacter>.from(state.characters);
     for (final projectile in projectiles) {
       currentCharacters = currentCharacters.map((char) {
-        final distanceToChar = sqrt(pow(projectile.targetCell.x - char.logicalPosition.x, 2) + pow(projectile.targetCell.y - char.logicalPosition.y, 2));
-        if (distanceToChar <= projectile.ability.aoeRadius) {
-          final newHealth = char.health - projectile.ability.damage;
-          List<StatusEffect> newEffects = List.from(char.activeEffects);
-          if (projectile.ability.appliesEffect != null) {
-            newEffects.add(projectile.ability.appliesEffect!.copyWith(startTime: DateTime.now()));
+        for (int y = 0; y < char.size.y; y++) {
+          for (int x = 0; x < char.size.x; x++) {
+            final charCell = Point(char.logicalPosition.x + x, char.logicalPosition.y + y);
+            final distanceToChar = sqrt(pow(projectile.targetCell.x - charCell.x, 2) + pow(projectile.targetCell.y - charCell.y, 2));
+            if (distanceToChar <= projectile.ability.aoeRadius) {
+              final newHealth = char.health - projectile.ability.damage;
+              List<StatusEffect> newEffects = List.from(char.activeEffects);
+              if (projectile.ability.appliesEffect != null) {
+                newEffects.add(projectile.ability.appliesEffect!.copyWith(startTime: DateTime.now()));
+              }
+              return char.copyWith(health: newHealth > 0 ? newHealth : 0, activeEffects: newEffects);
+            }
           }
-          return char.copyWith(health: newHealth > 0 ? newHealth : 0, activeEffects: newEffects);
         }
         return char;
       }).toList();
@@ -176,7 +194,7 @@ class GameController extends _$GameController {
 
         for (var direction in Direction.values) {
           final newPos = _getNewPosition(enemy.logicalPosition, direction);
-          if (isCellBlocked(newPos.x, newPos.y)) continue;
+          if (isCellBlocked(newPos.x, newPos.y, size: enemy.size)) continue;
 
           final distance = sqrt(pow(playerPos.x - newPos.x, 2) + pow(playerPos.y - newPos.y, 2));
           if (distance < minDistance) {
@@ -281,7 +299,7 @@ class GameController extends _$GameController {
     Point<int> newPos = player.logicalPosition;
     for (int i = 0; i < 3; i++) { // Dash 3 cells
       final nextPos = _getNewPosition(newPos, player.facingDirection);
-      if (isCellBlocked(nextPos.x, nextPos.y)) break; // Stop if a wall is hit
+      if (isCellBlocked(nextPos.x, nextPos.y, size: player.size)) break; // Stop if a wall is hit
       newPos = nextPos;
     }
 
@@ -331,7 +349,7 @@ class GameController extends _$GameController {
     final player = state.characters.first;
     final newPos = _getNewPosition(player.logicalPosition, direction);
 
-    if (!isCellBlocked(newPos.x, newPos.y)) {
+    if (!isCellBlocked(newPos.x, newPos.y, size: player.size)) {
       // No longer update facing direction on move
       final newPlayer = player.copyWith(logicalPosition: newPos);
       final newCharacters = List<GameCharacter>.from(state.characters);
@@ -368,11 +386,20 @@ class GameController extends _$GameController {
     };
   }
 
-  bool isCellBlocked(int x, int y) {
-    if (y < 0 || y >= state.grid.length || x < 0 || x >= state.grid[y].length) {
-      return true;
+  bool isCellBlocked(int x, int y, {Point<int> size = const Point(1, 1)}) {
+    for (int i = 0; i < size.y; i++) {
+      for (int j = 0; j < size.x; j++) {
+        final checkX = x + j;
+        final checkY = y + i;
+        if (checkY < 0 || checkY >= state.grid.length || checkX < 0 || checkX >= state.grid[checkY].length) {
+          return true;
+        }
+        if (!state.grid[checkY][checkX].isTraversable) {
+          return true;
+        }
+      }
     }
-    return !state.grid[y][x].isTraversable;
+    return false;
   }
 
   bool _hasWallInLineOfSight(Point<int> start, Point<int> end) {

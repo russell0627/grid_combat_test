@@ -14,6 +14,7 @@ class GameState {
   final List<GameCharacter> characters;
   final List<Projectile> projectiles;
   final int currentLevelIndex;
+  final bool isDebugMenuOpen;
 
   // State for targeting and buffering
   final Ability? targetingAbility;
@@ -33,6 +34,7 @@ class GameState {
     this.targetingPosition,
     this.pendingAbility,
     this.pendingTarget,
+    this.isDebugMenuOpen = false,
     HashSet<Direction>? activeMoveDirections,
   }) : activeMoveDirections = activeMoveDirections ?? HashSet<Direction>();
 
@@ -133,18 +135,36 @@ class GameState {
             ),
           ],
         ),
-        // Enemy
-        GameCharacter(
-          logicalPosition: enemyInitialPos,
-          abilities: const [
-            Ability(
-              name: 'Claw',
-              range: 1.5,
-              aoeRadius: 0.5,
-              damage: 10,
-            ),
-          ],
-        ),
+        // Enemies
+        ...level.enemySpawns.map((spawn) {
+          if (currentLevelIndex == 1 && spawn == level.enemySpawns.first) {
+            return GameCharacter(
+              logicalPosition: spawn,
+              size: const Point(2, 2),
+              health: 200,
+              maxHealth: 200,
+              abilities: const [
+                Ability(
+                  name: 'Slam',
+                  range: 2.5,
+                  aoeRadius: 1.5,
+                  damage: 20,
+                ),
+              ],
+            );
+          }
+          return GameCharacter(
+            logicalPosition: spawn,
+            abilities: const [
+              Ability(
+                name: 'Claw',
+                range: 1.5,
+                aoeRadius: 0.5,
+                damage: 10,
+              ),
+            ],
+          );
+        }),
       ],
       currentLevelIndex: currentLevelIndex,
     );
@@ -155,6 +175,7 @@ class GameState {
     List<GameCharacter>? characters,
     List<Projectile>? projectiles,
     int? currentLevelIndex,
+    bool? isDebugMenuOpen,
     Ability? targetingAbility,
     Point<int>? targetingPosition,
     bool clearTargeting = false,
@@ -168,6 +189,7 @@ class GameState {
       characters: characters ?? this.characters,
       projectiles: projectiles ?? this.projectiles,
       currentLevelIndex: currentLevelIndex ?? this.currentLevelIndex,
+      isDebugMenuOpen: isDebugMenuOpen ?? this.isDebugMenuOpen,
       targetingAbility:
           clearTargeting ? null : targetingAbility ?? this.targetingAbility,
       targetingPosition:

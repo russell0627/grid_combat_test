@@ -1,14 +1,14 @@
 import 'dart:math';
 import 'dart:ui';
-
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import 'controllers/game_controller.dart';
 import 'models/direction.dart';
 import 'models/game_character.dart';
 import 'models/grid_cell.dart'; // Import GridCell to access TerrainType
+import 'models/status_effect.dart'; // Import StatusEffect to check for stun
 import 'screens/controls_screen.dart';
 
 void main() {
@@ -80,6 +80,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         gameController.enterTargetingMode(player.abilities.firstWhere((ability) => ability.name == 'Stun Grenade'));
       } else if (event.logicalKey == LogicalKeyboardKey.space) {
         gameController.dash();
+      } else if (event.logicalKey == LogicalKeyboardKey.backquote) {
+        gameController.toggleDebugMenu();
       }
       return KeyEventResult.handled;
     } else if (event is KeyUpEvent) {
@@ -194,16 +196,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                                   curve: Curves.easeOutQuad,
                                   left: character.logicalPosition.x * GameScreen.cellSize,
                                   top: character.logicalPosition.y * GameScreen.cellSize,
-                                  width: GameScreen.cellSize,
-                                  height: GameScreen.cellSize,
+                                  width: GameScreen.cellSize * character.size.x,
+                                  height: GameScreen.cellSize * character.size.y,
                                   child: Stack(
                                     // <--- Wrapped in a Stack
                                     children: [
                                       Column(
                                         children: [
                                           Container(
-                                            width: GameScreen.cellSize,
-                                            height: GameScreen.cellSize - 10,
+                                            width: GameScreen.cellSize * character.size.x,
+                                            height: GameScreen.cellSize * character.size.y - 10,
                                             decoration: BoxDecoration(
                                               color: character == player ? Colors.blue : Colors.red,
                                             ),
@@ -216,7 +218,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                                           ),
                                           if (character == player)
                                             Container(
-                                              width: GameScreen.cellSize,
+                                              width: GameScreen.cellSize * character.size.x,
                                               height: 10,
                                               color: Colors.blue[900],
                                               child: FractionallySizedBox(
@@ -282,6 +284,26 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                         : _buildStandardControls(gameController, player, gameState.characters.length > 1),
                   ),
                 ),
+
+                // Debug Menu
+                if (gameState.isDebugMenuOpen)
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.all(8.0),
+                      color: Colors.black.withOpacity(0.7),
+                      child: Column(
+                        children: [
+                          const Text('Debug Menu', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ElevatedButton(
+                            child: const Text('Skip Level'),
+                            onPressed: () => gameController.skipLevel(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             );
           },
