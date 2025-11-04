@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:math';
 import 'package:flutter/scheduler.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -8,6 +9,8 @@ import '../models/game_character.dart';
 import '../models/game_state.dart';
 import '../models/grid_cell.dart';
 import '../models/projectile.dart';
+import '../models/status_effect.dart';
+import '../models/game_level.dart'; // Import GameLevel
 import '../main.dart'; // For cellSize
 
 part 'game_controller.g.dart';
@@ -16,6 +19,8 @@ part 'game_controller.g.dart';
 class GameController extends _$GameController {
   late final Ticker ticker;
   DateTime _lastAiUpdateTime = DateTime.now();
+  DateTime _lastManaUpdateTime = DateTime.now();
+  DateTime _lastMoveTime = DateTime.now();
 
   @override
   GameState build() {
@@ -26,8 +31,71 @@ class GameController extends _$GameController {
   }
 
   void _onTick(Duration elapsed) {
+    _handleContinuousMovement();
     _updateProjectiles();
     _updateAI();
+    _regenerateMana();
+    _updateStatusEffects();
+    _checkWinCondition();
+  }
+
+  void _handleContinuousMovement() {
+    if (state.activeMoveDirections.isEmpty) return;
+
+    final now = DateTime.now();
+    if (now.difference(_lastMoveTime).inMilliseconds < 200) return; // Move every 200ms
+    _lastMoveTime = now;
+
+    // Determine final direction from active keys
+    Direction? finalDirection;
+    if (state.activeMoveDirections.contains(Direction.up) && state.activeMoveDirections.contains(Direction.left)) {
+      finalDirection = Direction.upLeft;
+    } else if (state.activeMoveDirections.contains(Direction.up) && state.activeMoveDirections.contains(Direction.right)) {
+      finalDirection = Direction.upRight;
+    } else if (state.activeMoveDirections.contains(Direction.down) && state.activeMoveDirections.contains(Direction.left)) {
+      finalDirection = Direction.downLeft;
+    } else if (state.activeMoveDirections.contains(Direction.down) && state.activeMoveDirections.contains(Direction.right)) {
+      finalDirection = Direction.downRight;
+    } else if (state.activeMoveDirections.contains(Direction.up)) {
+      finalDirection = Direction.up;
+    } else if (state.activeMoveDirections.contains(Direction.down)) {
+      finalDirection = Direction.down;
+    } else if (state.activeMoveDirections.contains(Direction.left)) {
+      finalDirection = Direction.left;
+    } else if (state.activeMoveDirections.contains(Direction.right)) {
+      finalDirection = Direction.right;
+    }
+
+    if (finalDirection != null) {
+      movePlayer(finalDirection);
+    }
+  }
+
+  void startMoving(Direction direction) {
+    final newDirections = HashSet<Direction>.from(state.activeMoveDirections);
+    newDirections.add(direction);
+    state = state.copyWith(activeMoveDirections: newDirections);
+  }
+
+  void stopMoving(Direction direction) {
+    final newDirections = HashSet<Direction>.from(state.activeMoveDirections);
+    newDirections.remove(direction);
+    state = state.copyWith(activeMoveDirections: newDirections);
+  }
+
+  void _regenerateMana() {
+    final now = DateTime.now();
+    if (now.difference(_lastManaUpdateTime).inSeconds < 1) return;
+    _lastManaUpdateTime = now;
+
+    final updatedCharacters = state.characters.map((char) {
+      if (char.mana < char.maxMana) {
+        return char.copyWith(mana: char.mana + 1);
+      }
+      return char;
+    }).toList();
+
+    state = state.copyWith(characters: updatedCharacters);
   }
 
   void _updateProjectiles() {
@@ -59,13 +127,26 @@ class GameController extends _$GameController {
         final distanceToChar = sqrt(pow(projectile.targetCell.x - char.logicalPosition.x, 2) + pow(projectile.targetCell.y - char.logicalPosition.y, 2));
         if (distanceToChar <= projectile.ability.aoeRadius) {
           final newHealth = char.health - projectile.ability.damage;
-          return char.copyWith(health: newHealth > 0 ? newHealth : 0);
+          List<StatusEffect> newEffects = List.from(char.activeEffects);
+          if (projectile.ability.appliesEffect != null) {
+            newEffects.add(projectile.ability.appliesEffect!.copyWith(startTime: DateTime.now()));
+          }
+          return char.copyWith(health: newHealth > 0 ? newHealth : 0, activeEffects: newEffects);
         }
         return char;
       }).toList();
     }
     currentCharacters.removeWhere((char) => char.health <= 0);
     state = state.copyWith(characters: currentCharacters);
+  }
+
+  void _updateStatusEffects() {
+    final now = DateTime.now();
+    final updatedCharacters = state.characters.map((char) {
+      final remainingEffects = char.activeEffects.where((effect) => now.difference(effect.startTime!).compareTo(effect.duration) < 0).toList();
+      return char.copyWith(activeEffects: remainingEffects);
+    }).toList();
+    state = state.copyWith(characters: updatedCharacters);
   }
 
   void _updateAI() {
@@ -81,6 +162,9 @@ class GameController extends _$GameController {
 
     for (int i = 1; i < currentCharacters.length; i++) {
       final enemy = currentCharacters[i];
+      // If stunned, skip turn
+      if (enemy.isStunned) continue;
+
       final distanceToPlayer = sqrt(pow(playerPos.x - enemy.logicalPosition.x, 2) + pow(playerPos.y - enemy.logicalPosition.y, 2));
       final enemyAbility = enemy.abilities.first;
 
@@ -105,6 +189,26 @@ class GameController extends _$GameController {
       }
     }
     state = state.copyWith(characters: currentCharacters);
+  }
+
+  void _checkWinCondition() {
+    // Win condition: All enemies are defeated
+    if (state.characters.length == 1 && state.characters.first.health > 0) {
+      // Player is the only character left and is alive
+      if (state.currentLevelIndex < GameLevel.allLevels.length - 1) {
+        // Advance to next level
+        state = GameState.initial(currentLevelIndex: state.currentLevelIndex + 1);
+      } else {
+        // Game won!
+        // For now, just restart the first level.
+        state = GameState.initial(currentLevelIndex: 0);
+      }
+    }
+    // Lose condition: Player is defeated
+    else if (state.characters.isEmpty || (state.characters.length == 1 && state.characters.first.health <= 0)) {
+      // For now, just restart the first level.
+      state = GameState.initial(currentLevelIndex: 0);
+    }
   }
 
   void updateFacingDirection(Point<double> cursorPosition) {
@@ -166,9 +270,33 @@ class GameController extends _$GameController {
     _fireProjectile(0, ability, target);
   }
 
+  void dash() {
+    final player = state.characters.first;
+
+    // Cooldown check (2 seconds)
+    if (player.lastDashTime != null && DateTime.now().difference(player.lastDashTime!).inSeconds < 2) {
+      return;
+    }
+
+    Point<int> newPos = player.logicalPosition;
+    for (int i = 0; i < 3; i++) { // Dash 3 cells
+      final nextPos = _getNewPosition(newPos, player.facingDirection);
+      if (isCellBlocked(nextPos.x, nextPos.y)) break; // Stop if a wall is hit
+      newPos = nextPos;
+    }
+
+    final newPlayer = player.copyWith(logicalPosition: newPos, lastDashTime: DateTime.now());
+    final newCharacters = List<GameCharacter>.from(state.characters);
+    newCharacters[0] = newPlayer;
+    state = state.copyWith(characters: newCharacters);
+  }
+
   void _fireProjectile(int characterIndex, Ability ability, Point<int> target) {
     final caster = state.characters[characterIndex];
     final casterPos = caster.logicalPosition;
+
+    if (caster.mana < ability.manaCost) return; // Not enough mana
+
     final distanceToTarget = sqrt(pow(casterPos.x - target.x, 2) + pow(casterPos.y - target.y, 2));
 
     if (characterIndex == 0 && distanceToTarget > ability.range) {
@@ -192,7 +320,11 @@ class GameController extends _$GameController {
     );
 
     final newProjectiles = List<Projectile>.from(state.projectiles)..add(newProjectile);
-    state = state.copyWith(characters: state.characters, projectiles: newProjectiles, clearPending: true);
+    final newCaster = caster.copyWith(mana: caster.mana - ability.manaCost);
+    final newCharacters = List<GameCharacter>.from(state.characters);
+    newCharacters[characterIndex] = newCaster;
+
+    state = state.copyWith(characters: newCharacters, projectiles: newProjectiles, clearPending: true);
   }
 
   void movePlayer(Direction direction) {
