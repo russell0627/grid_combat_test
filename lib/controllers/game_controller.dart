@@ -10,12 +10,15 @@ import '../models/game_state.dart';
 import '../models/grid_cell.dart';
 import '../models/projectile.dart';
 import '../models/status_effect.dart';
-import '../models/game_level.dart'; // Import GameLevel
-import '../main.dart'; // For cellSize
+import '../models/game_level.dart';
+import '../models/player_class.dart';
+import '../models/equipment.dart';
+import '../models/hit_location.dart';
+import '../main.dart';
 
 part 'game_controller.g.dart';
 
-@riverpod
+@Riverpod(keepAlive: true)
 class GameController extends _$GameController {
   late final Ticker ticker;
   DateTime _lastAiUpdateTime = DateTime.now();
@@ -23,11 +26,11 @@ class GameController extends _$GameController {
   DateTime _lastMoveTime = DateTime.now();
 
   @override
-  GameState build() {
+  GameState build(PlayerClassType selectedClass) {
     ticker = Ticker(_onTick);
     ticker.start();
     ref.onDispose(() => ticker.dispose());
-    return GameState.initial();
+    return GameState.initial(selectedClass: selectedClass);
   }
 
   void _onTick(Duration elapsed) {
@@ -46,9 +49,9 @@ class GameController extends _$GameController {
 
   void skipLevel() {
     if (state.currentLevelIndex < GameLevel.allLevels.length - 1) {
-      state = GameState.initial(currentLevelIndex: state.currentLevelIndex + 1);
+      state = GameState.initial(currentLevelIndex: state.currentLevelIndex + 1, selectedClass: state.characters.first.playerClass!.type);
     } else {
-      state = GameState.initial(currentLevelIndex: 0); // Loop back to first level
+      state = GameState.initial(currentLevelIndex: 0, selectedClass: state.characters.first.playerClass!.type);
     }
   }
 
@@ -56,10 +59,9 @@ class GameController extends _$GameController {
     if (state.activeMoveDirections.isEmpty) return;
 
     final now = DateTime.now();
-    if (now.difference(_lastMoveTime).inMilliseconds < 200) return; // Move every 200ms
+    if (now.difference(_lastMoveTime).inMilliseconds < 200) return;
     _lastMoveTime = now;
 
-    // Determine final direction from active keys
     Direction? finalDirection;
     if (state.activeMoveDirections.contains(Direction.up) && state.activeMoveDirections.contains(Direction.left)) {
       finalDirection = Direction.upLeft;
@@ -85,14 +87,12 @@ class GameController extends _$GameController {
   }
 
   void startMoving(Direction direction) {
-    final newDirections = HashSet<Direction>.from(state.activeMoveDirections);
-    newDirections.add(direction);
+    final newDirections = HashSet<Direction>.from(state.activeMoveDirections)..add(direction);
     state = state.copyWith(activeMoveDirections: newDirections);
   }
 
   void stopMoving(Direction direction) {
-    final newDirections = HashSet<Direction>.from(state.activeMoveDirections);
-    newDirections.remove(direction);
+    final newDirections = HashSet<Direction>.from(state.activeMoveDirections)..remove(direction);
     state = state.copyWith(activeMoveDirections: newDirections);
   }
 
@@ -136,23 +136,56 @@ class GameController extends _$GameController {
   void _applyProjectileEffects(List<Projectile> projectiles) {
     var currentCharacters = List<GameCharacter>.from(state.characters);
     for (final projectile in projectiles) {
-      currentCharacters = currentCharacters.map((char) {
+      for (int i = 0; i < currentCharacters.length; i++) {
+        final char = currentCharacters[i];
+        // Determine a random hit location for the character
+        final hitLocation = projectile.ability.targetLocations[Random().nextInt(projectile.ability.targetLocations.length)];
+        final damageModifier = DamageModifier.modifiers[hitLocation]!;
+
         for (int y = 0; y < char.size.y; y++) {
           for (int x = 0; x < char.size.x; x++) {
             final charCell = Point(char.logicalPosition.x + x, char.logicalPosition.y + y);
             final distanceToChar = sqrt(pow(projectile.targetCell.x - charCell.x, 2) + pow(projectile.targetCell.y - charCell.y, 2));
             if (distanceToChar <= projectile.ability.aoeRadius) {
-              final newHealth = char.health - projectile.ability.damage;
+              // Calculate total armor value for the hit location
+              int totalArmor = 0;
+              for (final equipment in char.equipment.values) {
+                if (equipment.slot == EquipmentSlot.head && hitLocation == HitLocation.head) {
+                  totalArmor += equipment.armorValue;
+                } else if (equipment.slot == EquipmentSlot.chest && hitLocation == HitLocation.torso) {
+                  totalArmor += equipment.armorValue;
+                } else if (equipment.slot == EquipmentSlot.arms && hitLocation == HitLocation.arms) {
+                  totalArmor += equipment.armorValue;
+                } else if (equipment.slot == EquipmentSlot.legs && hitLocation == HitLocation.legs) {
+                  totalArmor += equipment.armorValue;
+                } else if (equipment.slot == EquipmentSlot.offHand && (hitLocation == HitLocation.arms || hitLocation == HitLocation.torso)) { // Shields can protect arms/torso
+                  totalArmor += equipment.armorValue;
+                }
+                // Add more specific armor slot/hit location mappings as needed
+              }
+
+              // Calculate damage after armor absorption
+              int effectiveDamage = projectile.ability.damage - totalArmor;
+              if (effectiveDamage < 0) effectiveDamage = 0; // Damage cannot be negative
+
+              // Apply hit location multiplier
+              effectiveDamage = (effectiveDamage * damageModifier.multiplier).round();
+
+              // Apply damage to specific hit location
+              final newHealthByLocation = Map<HitLocation, int>.from(char.healthByLocation);
+              newHealthByLocation[hitLocation] = (newHealthByLocation[hitLocation]! - effectiveDamage).clamp(0, char.maxHealthByLocation[hitLocation]!); // Clamp health to 0
+
+              // Update character with new health and effects
               List<StatusEffect> newEffects = List.from(char.activeEffects);
               if (projectile.ability.appliesEffect != null) {
                 newEffects.add(projectile.ability.appliesEffect!.copyWith(startTime: DateTime.now()));
               }
-              return char.copyWith(health: newHealth > 0 ? newHealth : 0, activeEffects: newEffects);
+              currentCharacters[i] = char.copyWith(healthByLocation: newHealthByLocation, activeEffects: newEffects);
+              break; // Apply effect only once per character
             }
           }
         }
-        return char;
-      }).toList();
+      }
     }
     currentCharacters.removeWhere((char) => char.health <= 0);
     state = state.copyWith(characters: currentCharacters);
@@ -169,69 +202,128 @@ class GameController extends _$GameController {
 
   void _updateAI() {
     final now = DateTime.now();
-    if (now.difference(_lastAiUpdateTime).inSeconds < 1) return;
+    if (now.difference(_lastAiUpdateTime).inMilliseconds < 400) return; // Slower AI movement
     _lastAiUpdateTime = now;
 
     if (state.characters.length <= 1) return;
 
     final player = state.characters.first;
-    final playerPos = player.logicalPosition;
     var currentCharacters = List<GameCharacter>.from(state.characters);
 
-    for (int i = 1; i < currentCharacters.length; i++) {
-      final enemy = currentCharacters[i];
-      // If stunned, skip turn
-      if (enemy.isStunned) continue;
+    for (int i = 0; i < currentCharacters.length; i++) {
+      final character = currentCharacters[i];
+      if (character == player || character.isStunned) continue;
 
-      final distanceToPlayer = sqrt(pow(playerPos.x - enemy.logicalPosition.x, 2) + pow(playerPos.y - enemy.logicalPosition.y, 2));
-      final enemyAbility = enemy.abilities.first;
-
-      if (distanceToPlayer <= enemyAbility.range) {
-        _fireProjectile(i, enemyAbility, playerPos);
-      } else {
-        Direction bestDirection = Direction.up;
-        double minDistance = double.infinity;
-
-        for (var direction in Direction.values) {
-          final newPos = _getNewPosition(enemy.logicalPosition, direction);
-          if (isCellBlocked(newPos.x, newPos.y, size: enemy.size)) continue;
-
-          final distance = sqrt(pow(playerPos.x - newPos.x, 2) + pow(playerPos.y - newPos.y, 2));
-          if (distance < minDistance) {
-            minDistance = distance;
-            bestDirection = direction;
+      GameCharacter? target;
+      if (character.abilities.first.isHeal) {
+        // Healer AI: Target most damaged non-player, non-summon character
+        double minHealthPercent = 1.0;
+        for (final otherChar in state.characters) {
+          if (otherChar != player && !otherChar.isSummon && otherChar.health < otherChar.maxHealth) {
+            final healthPercent = otherChar.health / otherChar.maxHealth;
+            if (healthPercent < minHealthPercent) {
+              minHealthPercent = healthPercent;
+              target = otherChar;
+            }
           }
         }
-        final finalPos = _getNewPosition(enemy.logicalPosition, bestDirection);
-        currentCharacters[i] = enemy.copyWith(logicalPosition: finalPos);
+      } else if (character.isSummon) {
+        // Summon AI: Target closest non-summon, non-player character
+        double minDistance = double.infinity;
+        for (final otherChar in state.characters) {
+          if (otherChar != player && !otherChar.isSummon) {
+            final distance = sqrt(pow(character.logicalPosition.x - otherChar.logicalPosition.x, 2) + pow(character.logicalPosition.y - otherChar.logicalPosition.y, 2));
+            if (distance < minDistance) {
+              minDistance = distance;
+              target = otherChar;
+            }
+          }
+        }
+      } else if (character.abilities.first.name == 'Summon') {
+        // Summoner AI: Summon if there are less than 3 summons
+        if (state.characters.where((c) => c.isSummon).length < 3) {
+          final spawnPos = Point(character.logicalPosition.x, character.logicalPosition.y + 1);
+          if (!isCellBlocked(spawnPos.x, spawnPos.y)) {
+            summonMinions(spawnPos);
+          }
+        }
+      } else {
+        // Regular Enemy AI: Target player
+        target = player;
+      }
+
+      if (target != null) {
+        final distanceToTarget = sqrt(pow(character.logicalPosition.x - target.logicalPosition.x, 2) + pow(character.logicalPosition.y - target.logicalPosition.y, 2));
+        final ability = character.abilities.first;
+
+        if (character.isRanged) {
+          if (distanceToTarget <= ability.range) {
+            _fireProjectile(i, ability, target.logicalPosition);
+          } else {
+            // Move closer
+            Direction bestDirection = Direction.up;
+            double minChaseDistance = double.infinity;
+
+            for (var direction in Direction.values) {
+              final newPos = _getNewPosition(character.logicalPosition, direction);
+              if (isCellBlocked(newPos.x, newPos.y, size: character.size, movingCharacter: character)) continue;
+
+              final distance = sqrt(pow(target.logicalPosition.x - newPos.x, 2) + pow(target.logicalPosition.y - newPos.y, 2));
+              if (distance < minChaseDistance) {
+                minChaseDistance = distance;
+                bestDirection = direction;
+              }
+            }
+            final finalPos = _getNewPosition(character.logicalPosition, bestDirection);
+            currentCharacters[i] = character.copyWith(logicalPosition: finalPos);
+          }
+        }
+        // Melee AI (including Healer and Summoner, if they move)
+        else {
+          if (distanceToTarget <= ability.range && !ability.isHeal) {
+            _fireProjectile(i, ability, target.logicalPosition);
+          } else if (ability.isHeal && distanceToTarget <= ability.range) {
+            _fireProjectile(i, ability, target.logicalPosition); // Healers fire at target
+          } else {
+            // Move closer
+            Direction bestDirection = Direction.up;
+            double minChaseDistance = double.infinity;
+
+            for (var direction in Direction.values) {
+              final newPos = _getNewPosition(character.logicalPosition, direction);
+              if (isCellBlocked(newPos.x, newPos.y, size: character.size, movingCharacter: character)) continue;
+
+              final distance = sqrt(pow(target.logicalPosition.x - newPos.x, 2) + pow(target.logicalPosition.y - newPos.y, 2));
+              if (distance < minChaseDistance) {
+                minChaseDistance = distance;
+                bestDirection = direction;
+              }
+            }
+            final finalPos = _getNewPosition(character.logicalPosition, bestDirection);
+            currentCharacters[i] = character.copyWith(logicalPosition: finalPos);
+          }
+        }
       }
     }
+    currentCharacters.removeWhere((char) => char.health <= 0);
     state = state.copyWith(characters: currentCharacters);
   }
 
   void _checkWinCondition() {
-    // Win condition: All enemies are defeated
-    if (state.characters.length == 1 && state.characters.first.health > 0) {
-      // Player is the only character left and is alive
+    if (state.characters.where((c) => !c.isSummon && c.playerClass == null).isEmpty) {
       if (state.currentLevelIndex < GameLevel.allLevels.length - 1) {
-        // Advance to next level
-        state = GameState.initial(currentLevelIndex: state.currentLevelIndex + 1);
+        state = GameState.initial(currentLevelIndex: state.currentLevelIndex + 1, selectedClass: state.characters.first.playerClass!.type);
       } else {
-        // Game won!
-        // For now, just restart the first level.
-        state = GameState.initial(currentLevelIndex: 0);
+        state = GameState.initial(currentLevelIndex: 0, selectedClass: state.characters.first.playerClass!.type);
       }
-    }
-    // Lose condition: Player is defeated
-    else if (state.characters.isEmpty || (state.characters.length == 1 && state.characters.first.health <= 0)) {
-      // For now, just restart the first level.
-      state = GameState.initial(currentLevelIndex: 0);
+    } else if (!state.characters.contains(state.characters.first) || state.characters.first.health <= 0) {
+      state = GameState.initial(currentLevelIndex: 0, selectedClass: state.characters.first.playerClass!.type);
     }
   }
 
   void updateFacingDirection(Point<double> cursorPosition) {
     final player = state.characters.first;
-    final playerScreenPos = Point(player.logicalPosition.x * GameScreen.cellSize + GameScreen.cellSize / 2, player.logicalPosition.y * GameScreen.cellSize + GameScreen.cellSize / 2);
+    final playerScreenPos = Point(player.logicalPosition.x * GameScreen.cellSize + (player.size.x * GameScreen.cellSize) / 2, player.logicalPosition.y * GameScreen.cellSize + (player.size.y * GameScreen.cellSize) / 2);
 
     final angle = atan2(cursorPosition.y - playerScreenPos.y, cursorPosition.x - playerScreenPos.x);
     final degrees = angle * 180 / pi;
@@ -269,7 +361,12 @@ class GameController extends _$GameController {
 
   void setTargetPosition(Point<int> position) {
     if (state.targetingAbility == null) return;
-    usePlayerAbility(state.targetingAbility!, position);
+
+    if (state.targetingAbility!.name == 'Summon Minion') {
+      summonMinions(position);
+    } else {
+      usePlayerAbility(state.targetingAbility!, position);
+    }
     state = state.copyWith(clearTargeting: true);
   }
 
@@ -283,7 +380,7 @@ class GameController extends _$GameController {
 
   void useMeleeAttack() {
     final player = state.characters.first;
-    final ability = player.abilities.firstWhere((a) => a.name == 'Sword Slash');
+    final ability = player.equipment[EquipmentSlot.mainHand]!.abilities.first;
     final target = _getNewPosition(player.logicalPosition, player.facingDirection);
     _fireProjectile(0, ability, target);
   }
@@ -291,7 +388,6 @@ class GameController extends _$GameController {
   void dash() {
     final player = state.characters.first;
 
-    // Cooldown check (2 seconds)
     if (player.lastDashTime != null && DateTime.now().difference(player.lastDashTime!).inSeconds < 2) {
       return;
     }
@@ -299,7 +395,7 @@ class GameController extends _$GameController {
     Point<int> newPos = player.logicalPosition;
     for (int i = 0; i < 3; i++) { // Dash 3 cells
       final nextPos = _getNewPosition(newPos, player.facingDirection);
-      if (isCellBlocked(nextPos.x, nextPos.y, size: player.size)) break; // Stop if a wall is hit
+      if (isCellBlocked(nextPos.x, newPos.y, size: player.size, movingCharacter: player)) break;
       newPos = nextPos;
     }
 
@@ -309,11 +405,57 @@ class GameController extends _$GameController {
     state = state.copyWith(characters: newCharacters);
   }
 
+  void summonMinions(Point<int> position) {
+    final player = state.characters.first;
+    final ability = player.abilities.firstWhere((a) => a.name == 'Summon Minion');
+
+    if (player.mana < ability.manaCost) return;
+
+    final newCharacters = List<GameCharacter>.from(state.characters);
+    final newPlayer = player.copyWith(mana: player.mana - ability.manaCost);
+    newCharacters[0] = newPlayer;
+
+    for (int i = 0; i < 2; i++) {
+      final spawnPos = Point(position.x + i, position.y);
+      if (isCellBlocked(spawnPos.x, spawnPos.y)) continue;
+
+      newCharacters.add(
+        GameCharacter(
+          logicalPosition: spawnPos,
+          isSummon: true,
+          healthByLocation: {
+            HitLocation.head: 5,
+            HitLocation.torso: 10,
+            HitLocation.arms: 5,
+            HitLocation.legs: 5,
+          },
+          maxHealthByLocation: {
+            HitLocation.head: 5,
+            HitLocation.torso: 10,
+            HitLocation.arms: 5,
+            HitLocation.legs: 5,
+          },
+          equipment: {
+            EquipmentSlot.mainHand: Equipment.items['Minion Claw']!,
+          },
+        ),
+      );
+    }
+
+    state = state.copyWith(characters: newCharacters);
+  }
+
   void _fireProjectile(int characterIndex, Ability ability, Point<int> target) {
     final caster = state.characters[characterIndex];
     final casterPos = caster.logicalPosition;
 
-    if (caster.mana < ability.manaCost) return; // Not enough mana
+    if (caster.mana < ability.manaCost) return;
+
+    // Check cooldown
+    if (caster.abilityCooldowns.containsKey(ability.name) &&
+        DateTime.now().difference(caster.abilityCooldowns[ability.name]!) < ability.cooldownDuration) {
+      return; // Ability is on cooldown
+    }
 
     final distanceToTarget = sqrt(pow(casterPos.x - target.x, 2) + pow(casterPos.y - target.y, 2));
 
@@ -328,17 +470,27 @@ class GameController extends _$GameController {
       return;
     }
 
+    // Apply skill-based damage bonus
+    int finalDamage = ability.damage;
+    if (ability.requiredSkillType != null && caster.skills.containsKey(ability.requiredSkillType)) {
+      final skillLevel = caster.skills[ability.requiredSkillType]!;
+      finalDamage += (skillLevel * 0.5).round(); // Example: +0.5 damage per skill level
+    }
+
     final newProjectile = Projectile(
-      startPosition: Point(casterPos.x * GameScreen.cellSize + GameScreen.cellSize / 2, casterPos.y * GameScreen.cellSize + GameScreen.cellSize / 2),
+      startPosition: Point(casterPos.x * GameScreen.cellSize + (caster.size.x * GameScreen.cellSize) / 2, casterPos.y * GameScreen.cellSize + (caster.size.y * GameScreen.cellSize) / 2),
       endPosition: Point(target.x * GameScreen.cellSize + GameScreen.cellSize / 2, target.y * GameScreen.cellSize + GameScreen.cellSize / 2),
       targetCell: target,
-      ability: ability,
+      ability: ability.copyWith(damage: finalDamage), // Pass modified damage to projectile
       startTime: DateTime.now(),
-      travelTime: const Duration(milliseconds: 50), // Melee attacks are almost instant
+      travelTime: const Duration(milliseconds: 500),
     );
 
     final newProjectiles = List<Projectile>.from(state.projectiles)..add(newProjectile);
-    final newCaster = caster.copyWith(mana: caster.mana - ability.manaCost);
+    final newCasterMana = caster.mana - ability.manaCost;
+    final newAbilityCooldowns = Map<String, DateTime>.from(caster.abilityCooldowns)..[ability.name] = DateTime.now();
+
+    final newCaster = caster.copyWith(mana: newCasterMana, abilityCooldowns: newAbilityCooldowns);
     final newCharacters = List<GameCharacter>.from(state.characters);
     newCharacters[characterIndex] = newCaster;
 
@@ -349,8 +501,7 @@ class GameController extends _$GameController {
     final player = state.characters.first;
     final newPos = _getNewPosition(player.logicalPosition, direction);
 
-    if (!isCellBlocked(newPos.x, newPos.y, size: player.size)) {
-      // No longer update facing direction on move
+    if (!isCellBlocked(newPos.x, newPos.y, size: player.size, movingCharacter: player)) {
       final newPlayer = player.copyWith(logicalPosition: newPos);
       final newCharacters = List<GameCharacter>.from(state.characters);
       newCharacters[0] = newPlayer;
@@ -386,16 +537,31 @@ class GameController extends _$GameController {
     };
   }
 
-  bool isCellBlocked(int x, int y, {Point<int> size = const Point(1, 1)}) {
+  bool isCellBlocked(int x, int y, {Point<int> size = const Point(1, 1), GameCharacter? movingCharacter}) {
     for (int i = 0; i < size.y; i++) {
       for (int j = 0; j < size.x; j++) {
         final checkX = x + j;
         final checkY = y + i;
+
+        // Check for grid boundaries and non-traversable terrain
         if (checkY < 0 || checkY >= state.grid.length || checkX < 0 || checkX >= state.grid[checkY].length) {
           return true;
         }
         if (!state.grid[checkY][checkX].isTraversable) {
           return true;
+        }
+
+        // Check for other characters
+        for (final character in state.characters) {
+          if (character == movingCharacter) continue; // Don't collide with self
+
+          for (int charY = 0; charY < character.size.y; charY++) {
+            for (int charX = 0; charX < character.size.x; charX++) {
+              if (checkX == character.logicalPosition.x + charX && checkY == character.logicalPosition.y + charY) {
+                return true; // Collision detected
+              }
+            }
+          }
         }
       }
     }

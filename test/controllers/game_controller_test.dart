@@ -3,15 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:grid_combat_test/controllers/game_controller.dart';
 import 'package:grid_combat_test/models/direction.dart';
+import 'package:grid_combat_test/models/player_class.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized(); // Add this line
+
   group('GameController', () {
     late ProviderContainer container;
     late GameController controller;
 
     setUp(() {
       container = ProviderContainer();
-      controller = container.read(gameControllerProvider.notifier);
+      controller = container.read(gameControllerProvider(PlayerClassType.warrior).notifier);
       // Stop the ticker to prevent automatic updates during tests.
       controller.ticker.stop();
     });
@@ -26,8 +29,8 @@ void main() {
       test('isCellBlocked returns true for out-of-bounds coordinates', () {
         expect(controller.isCellBlocked(-1, 0), isTrue);
         expect(controller.isCellBlocked(0, -1), isTrue);
-        expect(controller.isCellBlocked(20, 0), isTrue);
-        expect(controller.isCellBlocked(0, 20), isTrue);
+        expect(controller.isCellBlocked(30, 0), isTrue);
+        expect(controller.isCellBlocked(0, 30), isTrue);
       });
 
       test('isCellBlocked returns false for traversable cells', () {
@@ -43,13 +46,13 @@ void main() {
     group('Player Movement', () {
       test('movePlayer updates player position on valid move', () {
         final initialPosition = container
-            .read(gameControllerProvider)
+            .read(gameControllerProvider(PlayerClassType.warrior))
             .characters
             .first
             .logicalPosition;
         controller.movePlayer(Direction.right);
         final newPosition = container
-            .read(gameControllerProvider)
+            .read(gameControllerProvider(PlayerClassType.warrior))
             .characters
             .first
             .logicalPosition;
@@ -58,14 +61,14 @@ void main() {
 
       test('movePlayer does not update player position on invalid move', () {
         final initialPosition = container
-            .read(gameControllerProvider)
+            .read(gameControllerProvider(PlayerClassType.warrior))
             .characters
             .first
             .logicalPosition;
         controller.setCell(initialPosition.x + 1, initialPosition.y, traversable: false);
         controller.movePlayer(Direction.right);
         final newPosition = container
-            .read(gameControllerProvider)
+            .read(gameControllerProvider(PlayerClassType.warrior))
             .characters
             .first
             .logicalPosition;
@@ -75,65 +78,49 @@ void main() {
 
     group('Abilities', () {
       test('usePlayerAbility creates a projectile', () {
-        final player = container
-            .read(gameControllerProvider)
-            .characters
-            .first;
-        final enemy = container
-            .read(gameControllerProvider)
-            .characters
-            .last;
-        final fireball = player.abilities.first;
+        final mageController = container.read(gameControllerProvider(PlayerClassType.mage).notifier);
+        final player = container.read(gameControllerProvider(PlayerClassType.mage)).characters.first;
+        final enemy = container.read(gameControllerProvider(PlayerClassType.mage)).characters.last;
+        final fireball = player.abilities.firstWhere((a) => a.name == 'Fireball');
         final targetPoint = enemy.logicalPosition;
 
-        expect(container
-            .read(gameControllerProvider)
-            .projectiles, isEmpty);
+        expect(container.read(gameControllerProvider(PlayerClassType.mage)).projectiles, isEmpty);
 
-        controller.usePlayerAbility(fireball, targetPoint);
+        mageController.usePlayerAbility(fireball, targetPoint);
 
-        expect(container
-            .read(gameControllerProvider)
-            .projectiles, isNotEmpty);
-        expect(container
-            .read(gameControllerProvider)
-            .projectiles
-            .first
-            .ability
-            .name, 'Fireball');
+        expect(container.read(gameControllerProvider(PlayerClassType.mage)).projectiles, isNotEmpty);
+        expect(container.read(gameControllerProvider(PlayerClassType.mage)).projectiles.first.ability.name, 'Fireball');
       });
     });
 
     group('Action Buffering', () {
       test('buffers and executes action when player moves into range', () {
-        final player = container
-            .read(gameControllerProvider)
-            .characters
-            .first;
+        final mageController = container.read(gameControllerProvider(PlayerClassType.mage).notifier);
+        final player = container.read(gameControllerProvider(PlayerClassType.mage)).characters.first;
         final enemy = container
-            .read(gameControllerProvider)
+            .read(gameControllerProvider(PlayerClassType.mage))
             .characters
             .last
             .copyWith(logicalPosition: const Point(15, 15));
-        controller.state = controller.state.copyWith(characters: [player, enemy]);
+        mageController.state = mageController.state.copyWith(characters: [player, enemy]);
 
-        final fireball = player.abilities.first;
+        final fireball = player.abilities.firstWhere((a) => a.name == 'Fireball');
         final targetPoint = enemy.logicalPosition;
 
-        controller.usePlayerAbility(fireball, targetPoint);
+        mageController.usePlayerAbility(fireball, targetPoint);
 
-        var currentState = container.read(gameControllerProvider);
+        var currentState = container.read(gameControllerProvider(PlayerClassType.mage));
         expect(currentState.pendingAbility, fireball);
         expect(currentState.pendingTarget, targetPoint);
         expect(currentState.projectiles, isEmpty); // No projectile should be fired yet.
 
-        controller.movePlayer(Direction.downRight);
-        controller.movePlayer(Direction.downRight);
-        controller.movePlayer(Direction.downRight);
-        controller.movePlayer(Direction.downRight);
-        controller.movePlayer(Direction.downRight);
+        mageController.movePlayer(Direction.downRight);
+        mageController.movePlayer(Direction.downRight);
+        mageController.movePlayer(Direction.downRight);
+        mageController.movePlayer(Direction.downRight);
+        mageController.movePlayer(Direction.downRight);
 
-        currentState = container.read(gameControllerProvider);
+        currentState = container.read(gameControllerProvider(PlayerClassType.mage));
         expect(currentState.pendingAbility, isNull);
         expect(currentState.projectiles, isNotEmpty); // A projectile should now be in flight.
       });

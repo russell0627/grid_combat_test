@@ -6,6 +6,9 @@ import './game_character.dart';
 import './projectile.dart';
 import './status_effect.dart';
 import './game_level.dart';
+import './player_class.dart';
+import './equipment.dart';
+import './hit_location.dart';
 import '../models/direction.dart';
 
 /// Represents the entire state of the game at a single point in time.
@@ -40,8 +43,10 @@ class GameState {
 
   factory GameState.initial({
     int currentLevelIndex = 0,
+    PlayerClassType selectedClass = PlayerClassType.warrior,
   }) {
     final level = GameLevel.allLevels[currentLevelIndex];
+    final playerClass = PlayerClass.classes[selectedClass]!;
     final random = Random();
     final List<List<GridCell>> initialGrid = List.generate(
       level.height,
@@ -80,13 +85,12 @@ class GameState {
     // --- Generate Walls ---
     // Ensure walls don't block initial character positions
     final playerInitialPos = level.playerSpawn;
-    final enemyInitialPos = level.enemySpawns.first; // For simplicity, use only the first enemy spawn
 
     for (int y = 0; y < level.height; y++) {
       for (int x = 0; x < level.width; x++) {
         // Avoid placing walls on initial character spawn points
         if ((x == playerInitialPos.x && y == playerInitialPos.y) ||
-            (x == enemyInitialPos.x && y == enemyInitialPos.y)) {
+            level.enemySpawns.any((spawn) => spawn.x == x && spawn.y == y)) {
           continue;
         }
         // Avoid placing walls on water
@@ -101,69 +105,208 @@ class GameState {
       }
     }
 
+    // Determine initial player equipment based on class
+    final Map<EquipmentSlot, Equipment> playerEquipment = {};
+    if (selectedClass == PlayerClassType.warrior) {
+      playerEquipment[EquipmentSlot.mainHand] = Equipment.items['Iron Sword']!;
+      playerEquipment[EquipmentSlot.offHand] = Equipment.items['Wooden Shield']!;
+      playerEquipment[EquipmentSlot.chest] = Equipment.items['Leather Tunic']!;
+      playerEquipment[EquipmentSlot.head] = Equipment.items['Leather Cap']!;
+      playerEquipment[EquipmentSlot.arms] = Equipment.items['Leather Bracers']!;
+      playerEquipment[EquipmentSlot.legs] = Equipment.items['Leather Pants']!;
+    } else if (selectedClass == PlayerClassType.mage) {
+      playerEquipment[EquipmentSlot.mainHand] = Equipment.items['Fire Staff']!;
+      playerEquipment[EquipmentSlot.trinket1] = Equipment.items['Mana Amulet']!;
+      playerEquipment[EquipmentSlot.trinket2] = Equipment.items['Summoning Stone']!;
+      playerEquipment[EquipmentSlot.head] = Equipment.items['Cloth Hood']!;
+      playerEquipment[EquipmentSlot.chest] = Equipment.items['Cloth Robe']!;
+      playerEquipment[EquipmentSlot.arms] = Equipment.items['Cloth Wraps']!;
+      playerEquipment[EquipmentSlot.legs] = Equipment.items['Cloth Pants']!;
+    }
+
+    // Calculate initial player health based on Constitution
+    final int playerTotalMaxHealth = playerClass.baseConstitution * 10; // Example: 10 HP per Constitution
+    final Map<HitLocation, int> playerMaxHealthByLocation = {
+      HitLocation.head: playerTotalMaxHealth ~/ 4,
+      HitLocation.torso: playerTotalMaxHealth ~/ 2,
+      HitLocation.arms: playerTotalMaxHealth ~/ 8,
+      HitLocation.legs: playerTotalMaxHealth ~/ 8,
+    };
+    final Map<HitLocation, int> playerHealthByLocation = Map<HitLocation, int>.from(playerMaxHealthByLocation);
+
+    // Calculate initial player mana based on Intelligence
+    final int playerMaxMana = playerClass.baseIntelligence * 5; // Example: 5 Mana per Intelligence
+
     return GameState(
       grid: initialGrid,
       characters: [
         // Player
         GameCharacter(
           logicalPosition: playerInitialPos,
-          abilities: const [
-            Ability(
-              name: 'Fireball',
-              range: 8,
-              aoeRadius: 2.5,
-              damage: 25,
-              manaCost: 20,
-            ),
-            Ability(
-              name: 'Sword Slash',
-              range: 1.5,
-              aoeRadius: 0.5,
-              damage: 15,
-              manaCost: 0, // Now free!
-            ),
-            Ability(
-              name: 'Stun Grenade',
-              range: 6,
-              aoeRadius: 2.0,
-              damage: 0, // No damage
-              manaCost: 30,
-              appliesEffect: StatusEffect(
-                type: EffectType.stun,
-                duration: Duration(seconds: 3),
-              ),
-            ),
-          ],
+          playerClass: playerClass,
+          healthByLocation: playerHealthByLocation,
+          maxHealthByLocation: playerMaxHealthByLocation,
+          mana: playerMaxMana,
+          maxMana: playerMaxMana,
+          equipment: playerEquipment,
+          strength: playerClass.baseStrength,
+          dexterity: playerClass.baseDexterity,
+          intelligence: playerClass.baseIntelligence,
+          constitution: playerClass.baseConstitution,
+          skills: playerClass.startingSkills, // Initialize skills
         ),
         // Enemies
-        ...level.enemySpawns.map((spawn) {
-          if (currentLevelIndex == 1 && spawn == level.enemySpawns.first) {
+        ...level.enemySpawns.asMap().entries.map((entry) {
+          final index = entry.key;
+          final spawn = entry.value;
+
+          // Default enemy stats (can be customized per enemy type later)
+          final enemyBaseHealth = 50;
+          final Map<HitLocation, int> enemyMaxHealthByLocation = {
+            HitLocation.head: enemyBaseHealth ~/ 4,
+            HitLocation.torso: enemyBaseHealth ~/ 2,
+            HitLocation.arms: enemyBaseHealth ~/ 8,
+            HitLocation.legs: enemyBaseHealth ~/ 8,
+          };
+          final Map<HitLocation, int> enemyHealthByLocation = Map<HitLocation, int>.from(enemyMaxHealthByLocation);
+
+          if (currentLevelIndex == 1 && index == 0) {
             return GameCharacter(
               logicalPosition: spawn,
               size: const Point(2, 2),
-              health: 200,
-              maxHealth: 200,
-              abilities: const [
-                Ability(
-                  name: 'Slam',
-                  range: 2.5,
-                  aoeRadius: 1.5,
-                  damage: 20,
+              healthByLocation: {
+                HitLocation.head: 50,
+                HitLocation.torso: 100,
+                HitLocation.arms: 25,
+                HitLocation.legs: 25,
+              },
+              maxHealthByLocation: {
+                HitLocation.head: 50,
+                HitLocation.torso: 100,
+                HitLocation.arms: 25,
+                HitLocation.legs: 25,
+              },
+              equipment: {
+                EquipmentSlot.mainHand: Equipment(
+                  name: 'Slam Attack',
+                  slot: EquipmentSlot.mainHand,
+                  type: EquipmentType.sword, // Placeholder type
+                  abilities: [
+                    Ability(
+                      name: 'Slam',
+                      range: 2.5,
+                      aoeRadius: 1.5,
+                      damage: 20,
+                      targetLocations: [HitLocation.torso, HitLocation.arms, HitLocation.legs],
+                      cooldownDuration: Duration(seconds: 2),
+                      requiredSkillType: WeaponSkillType.unarmed,
+                    ),
+                  ],
                 ),
-              ],
+              },
             );
           }
-          return GameCharacter(
-            logicalPosition: spawn,
-            abilities: const [
-              Ability(
-                name: 'Claw',
-                range: 1.5,
-                aoeRadius: 0.5,
-                damage: 10,
-              ),
-            ],
-          );
+          // Alternate between melee, ranged and healer enemies
+          if (index % 4 == 0) {
+            return GameCharacter(
+              logicalPosition: spawn,
+              isRanged: true,
+              healthByLocation: enemyHealthByLocation,
+              maxHealthByLocation: enemyMaxHealthByLocation,
+              equipment: {
+                EquipmentSlot.mainHand: Equipment(
+                  name: 'Spit Attack',
+                  slot: EquipmentSlot.mainHand,
+                  type: EquipmentType.staff, // Placeholder type
+                  abilities: [
+                    Ability(
+                      name: 'Spit',
+                      range: 6,
+                      aoeRadius: 0.5,
+                      damage: 8,
+                      targetLocations: [HitLocation.head, HitLocation.torso, HitLocation.arms, HitLocation.legs],
+                      cooldownDuration: Duration(seconds: 1),
+                      requiredSkillType: WeaponSkillType.ranged,
+                    ),
+                  ],
+                ),
+              },
+            );
+          } else if (index % 4 == 1) {
+            return GameCharacter(
+              logicalPosition: spawn,
+              healthByLocation: enemyHealthByLocation,
+              maxHealthByLocation: enemyMaxHealthByLocation,
+              equipment: {
+                EquipmentSlot.mainHand: Equipment(
+                  name: 'Claw Attack',
+                  slot: EquipmentSlot.mainHand,
+                  type: EquipmentType.sword, // Placeholder type
+                  abilities: [
+                    Ability(
+                      name: 'Claw',
+                      range: 1.5,
+                      aoeRadius: 0.5,
+                      damage: 10,
+                      targetLocations: [HitLocation.torso, HitLocation.arms],
+                      cooldownDuration: Duration(milliseconds: 800),
+                      requiredSkillType: WeaponSkillType.unarmed,
+                    ),
+                  ],
+                ),
+              },
+            );
+          } else if (index % 4 == 2) {
+            return GameCharacter(
+              logicalPosition: spawn,
+              healthByLocation: enemyHealthByLocation,
+              maxHealthByLocation: enemyMaxHealthByLocation,
+              equipment: {
+                EquipmentSlot.mainHand: Equipment(
+                  name: 'Heal Spell',
+                  slot: EquipmentSlot.mainHand,
+                  type: EquipmentType.staff, // Placeholder type
+                  abilities: [
+                    Ability(
+                      name: 'Heal',
+                      range: 5,
+                      aoeRadius: 1.0,
+                      damage: -15, // Negative damage to heal
+                      isHeal: true,
+                      targetLocations: [HitLocation.head, HitLocation.torso, HitLocation.arms, HitLocation.legs],
+                      cooldownDuration: Duration(seconds: 3),
+                      requiredSkillType: WeaponSkillType.magic,
+                    ),
+                  ],
+                ),
+              },
+            );
+          } else {
+            return GameCharacter(
+              logicalPosition: spawn,
+              healthByLocation: enemyHealthByLocation,
+              maxHealthByLocation: enemyMaxHealthByLocation,
+              equipment: {
+                EquipmentSlot.mainHand: Equipment(
+                  name: 'Summoning Orb',
+                  slot: EquipmentSlot.mainHand,
+                  type: EquipmentType.staff, // Placeholder type
+                  abilities: [
+                    Ability(
+                      name: 'Summon',
+                      range: 4,
+                      aoeRadius: 0.5,
+                      damage: 0,
+                      manaCost: 20,
+                      targetLocations: [HitLocation.torso], // Summon doesn't target a body part
+                      cooldownDuration: Duration(seconds: 10),
+                      requiredSkillType: WeaponSkillType.magic,
+                    ),
+                  ],
+                ),
+              },
+            );
+          }
         }),
       ],
       currentLevelIndex: currentLevelIndex,

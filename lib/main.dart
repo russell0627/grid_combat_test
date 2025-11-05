@@ -6,9 +6,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'controllers/game_controller.dart';
 import 'models/direction.dart';
+import 'models/equipment.dart';
 import 'models/game_character.dart';
 import 'models/grid_cell.dart'; // Import GridCell to access TerrainType
 import 'models/status_effect.dart'; // Import StatusEffect to check for stun
+import 'models/player_class.dart';
+import 'screens/class_selection_screen.dart';
 import 'screens/controls_screen.dart';
 
 void main() {
@@ -27,13 +30,14 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
       debugShowCheckedModeBanner: false, // Remove debug flag
-      home: const GameScreen(),
+      home: const ClassSelectionScreen(),
     );
   }
 }
 
 class GameScreen extends ConsumerStatefulWidget {
-  const GameScreen({super.key});
+  final PlayerClassType selectedClass;
+  const GameScreen({super.key, required this.selectedClass});
 
   static const double cellSize = 40.0; // Increased cell size for a larger play area
 
@@ -57,8 +61,9 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   }
 
   KeyEventResult _handleKeyEvent(KeyEvent event) {
-    final gameController = ref.read(gameControllerProvider.notifier);
-    final player = ref.read(gameControllerProvider).characters.first;
+    final gameController = ref.read(gameControllerProvider(widget.selectedClass).notifier);
+    final gameState = ref.read(gameControllerProvider(widget.selectedClass)); // Read current state
+    final player = gameState.characters.first; // Access player from the state
 
     if (event is KeyDownEvent) {
       // Handle movement key presses
@@ -73,11 +78,19 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       }
       // Handle ability hotkeys
       else if (event.logicalKey == LogicalKeyboardKey.digit1) {
-        gameController.enterTargetingMode(player.abilities.firstWhere((ability) => ability.name == 'Fireball'));
+        if (player.abilities.isNotEmpty) gameController.enterTargetingMode(player.abilities[0]);
       } else if (event.logicalKey == LogicalKeyboardKey.digit2) {
-        gameController.useMeleeAttack();
+        if (player.abilities.length > 1) {
+          if (player.abilities[1].name == 'Sword Slash' || player.abilities[1].name == 'Axe Chop' || player.abilities[1].name == 'Mace Bash') {
+            gameController.useMeleeAttack();
+          } else {
+            gameController.enterTargetingMode(player.abilities[1]);
+          }
+        }
       } else if (event.logicalKey == LogicalKeyboardKey.digit3) {
-        gameController.enterTargetingMode(player.abilities.firstWhere((ability) => ability.name == 'Stun Grenade'));
+        if (player.abilities.length > 2) gameController.enterTargetingMode(player.abilities[2]);
+      } else if (event.logicalKey == LogicalKeyboardKey.digit4) {
+        if (player.abilities.length > 3) gameController.enterTargetingMode(player.abilities[3]);
       } else if (event.logicalKey == LogicalKeyboardKey.space) {
         gameController.dash();
       } else if (event.logicalKey == LogicalKeyboardKey.backquote) {
@@ -102,8 +115,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final gameState = ref.watch(gameControllerProvider);
-    final gameController = ref.read(gameControllerProvider.notifier);
+    final gameState = ref.watch(gameControllerProvider(widget.selectedClass));
+    final gameController = ref.read(gameControllerProvider(widget.selectedClass).notifier);
     final player = gameState.characters.isNotEmpty ? gameState.characters.first : null;
     final isTargeting = gameState.targetingAbility != null;
 
@@ -201,33 +214,29 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                                   child: Stack(
                                     // <--- Wrapped in a Stack
                                     children: [
-                                      Column(
-                                        children: [
-                                          Container(
-                                            width: GameScreen.cellSize * character.size.x,
-                                            height: GameScreen.cellSize * character.size.y - 10,
-                                            decoration: BoxDecoration(
-                                              color: character == player ? Colors.blue : Colors.red,
-                                            ),
-                                            child: Center(
-                                              child: Text(
-                                                '${character.health}',
-                                                style: const TextStyle(color: Colors.white, fontSize: 12),
-                                              ),
-                                            ),
+                                      Container(
+                                        width: GameScreen.cellSize * character.size.x,
+                                        height: GameScreen.cellSize * character.size.y - 10,
+                                        decoration: BoxDecoration(
+                                          color: character.isSummon ? Colors.purple[300] : (character == player ? Colors.blue : Colors.red),
+                                        ),
+                                        child: Center(
+                                          child: Text(
+                                            '${character.health}',
+                                            style: const TextStyle(color: Colors.white, fontSize: 12),
                                           ),
-                                          if (character == player)
-                                            Container(
-                                              width: GameScreen.cellSize * character.size.x,
-                                              height: 10,
-                                              color: Colors.blue[900],
-                                              child: FractionallySizedBox(
-                                                widthFactor: player.mana / player.maxMana,
-                                                child: Container(color: Colors.lightBlueAccent),
-                                              ),
-                                            ),
-                                        ],
+                                        ),
                                       ),
+                                      if (character == player)
+                                        Container(
+                                          width: GameScreen.cellSize * character.size.x,
+                                          height: 10,
+                                          color: Colors.blue[900],
+                                          child: FractionallySizedBox(
+                                            widthFactor: player.mana / player.maxMana,
+                                            child: Container(color: Colors.lightBlueAccent),
+                                          ),
+                                        ),
                                       // Stunned indicator, now correctly inside the Stack
                                       if (character.isStunned)
                                         Positioned.fill(
@@ -243,6 +252,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
 
                             // Render projectiles
                             ...gameState.projectiles.map((projectile) {
+                              // Determine projectile size and color based on ability type
+                              double projectileSize = 10;
+                              Color projectileColor = Colors.orange;
+
+                              if (projectile.ability.requiredSkillType == WeaponSkillType.oneHandedMelee ||
+                                  projectile.ability.requiredSkillType == WeaponSkillType.twoHandedMelee) {
+                                projectileSize = GameScreen.cellSize * 0.75;
+                                projectileColor = Colors.blueGrey; // Representing a cleaving attack
+                              }
+
                               final curvedProgress = Curves.easeOutQuad.transform(
                                 DateTime.now().difference(projectile.startTime).inMilliseconds /
                                     projectile.travelTime.inMilliseconds,
@@ -254,13 +273,15 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                                     projectile.startPosition.y,
                               );
                               return Positioned(
-                                left: currentPos.x - 5,
-                                // Center the projectile
-                                top: currentPos.y - 5,
-                                width: 10,
-                                height: 10,
+                                left: currentPos.x - (projectileSize / 2), // Center the projectile
+                                top: currentPos.y - (projectileSize / 2),
+                                width: projectileSize,
+                                height: projectileSize,
                                 child: Container(
-                                  decoration: const BoxDecoration(color: Colors.orange, shape: BoxShape.circle),
+                                  decoration: BoxDecoration(
+                                    color: projectileColor,
+                                    shape: BoxShape.circle,
+                                  ),
                                 ),
                               );
                             }),
@@ -322,21 +343,31 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (hasEnemies && player != null)
-              ElevatedButton(
-                child: const Text('Fireball (1)'),
-                onPressed: () => gameController.enterTargetingMode(
-                  player.abilities.firstWhere((ability) => ability.name == 'Fireball'),
-                ),
-              ),
-            if (hasEnemies && player != null)
-              ElevatedButton(child: const Text('Sword Slash (2)'), onPressed: () => gameController.useMeleeAttack()),
-            if (player != null)
-              ElevatedButton(
-                child: const Text('Stun Grenade (3)'),
-                onPressed: () => gameController.enterTargetingMode(
-                  player.abilities.firstWhere((ability) => ability.name == 'Stun Grenade'),
-                ),
-              ),
+              ...player.abilities.asMap().entries.map((entry) {
+                final index = entry.key;
+                final ability = entry.value;
+                final lastUsedTime = player.abilityCooldowns[ability.name];
+                final remainingCooldown = lastUsedTime != null
+                    ? ability.cooldownDuration.inMilliseconds -
+                        DateTime.now().difference(lastUsedTime).inMilliseconds
+                    : 0;
+                final isOnCooldown = remainingCooldown > 0;
+
+                return ElevatedButton(
+                  onPressed: isOnCooldown
+                      ? null
+                      : () {
+                          if (ability.name == 'Sword Slash' || ability.name == 'Axe Chop' || ability.name == 'Mace Bash') {
+                            gameController.useMeleeAttack();
+                          } else {
+                            gameController.enterTargetingMode(ability);
+                          }
+                        },
+                  child: Text(
+                    '${ability.name} (${index + 1})' + (isOnCooldown ? ' (${(remainingCooldown / 1000).ceil()}s)' : ''),
+                  ),
+                );
+              }),
             if (player != null)
               ElevatedButton(child: const Text('Dash (Space)'), onPressed: () => gameController.dash()),
           ],
