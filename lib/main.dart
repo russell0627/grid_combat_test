@@ -81,7 +81,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         if (player.abilities.isNotEmpty) gameController.enterTargetingMode(player.abilities[0]);
       } else if (event.logicalKey == LogicalKeyboardKey.digit2) {
         if (player.abilities.length > 1) {
-          if (player.abilities[1].name == 'Sword Slash' || player.abilities[1].name == 'Axe Chop' || player.abilities[1].name == 'Mace Bash') {
+          if (player.abilities[1].requiredSkillType == WeaponSkillType.oneHandedMelee || player.abilities[1].requiredSkillType == WeaponSkillType.twoHandedMelee || player.abilities[1].requiredSkillType == WeaponSkillType.unarmed) {
             gameController.useMeleeAttack();
           } else {
             gameController.enterTargetingMode(player.abilities[1]);

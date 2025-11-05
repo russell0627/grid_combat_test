@@ -149,19 +149,20 @@ class GameController extends _$GameController {
             if (distanceToChar <= projectile.ability.aoeRadius) {
               // Calculate total armor value for the hit location
               int totalArmor = 0;
-              for (final equipment in char.equipment.values) {
-                if (equipment.slot == EquipmentSlot.head && hitLocation == HitLocation.head) {
-                  totalArmor += equipment.armorValue;
-                } else if (equipment.slot == EquipmentSlot.chest && hitLocation == HitLocation.torso) {
-                  totalArmor += equipment.armorValue;
-                } else if (equipment.slot == EquipmentSlot.arms && hitLocation == HitLocation.arms) {
-                  totalArmor += equipment.armorValue;
-                } else if (equipment.slot == EquipmentSlot.legs && hitLocation == HitLocation.legs) {
-                  totalArmor += equipment.armorValue;
-                } else if (equipment.slot == EquipmentSlot.offHand && (hitLocation == HitLocation.arms || hitLocation == HitLocation.torso)) { // Shields can protect arms/torso
-                  totalArmor += equipment.armorValue;
-                }
-                // Add more specific armor slot/hit location mappings as needed
+              if (char.equipment.containsKey(EquipmentSlot.head) && hitLocation == HitLocation.head) {
+                totalArmor += char.equipment[EquipmentSlot.head]!.armorValue;
+              }
+              if (char.equipment.containsKey(EquipmentSlot.chest) && hitLocation == HitLocation.torso) {
+                totalArmor += char.equipment[EquipmentSlot.chest]!.armorValue;
+              }
+              if (char.equipment.containsKey(EquipmentSlot.arms) && hitLocation == HitLocation.arms) {
+                totalArmor += char.equipment[EquipmentSlot.arms]!.armorValue;
+              }
+              if (char.equipment.containsKey(EquipmentSlot.legs) && hitLocation == HitLocation.legs) {
+                totalArmor += char.equipment[EquipmentSlot.legs]!.armorValue;
+              }
+              if (char.equipment.containsKey(EquipmentSlot.offHand) && (hitLocation == HitLocation.arms || hitLocation == HitLocation.torso)) {
+                totalArmor += char.equipment[EquipmentSlot.offHand]!.armorValue;
               }
 
               // Calculate damage after armor absorption
@@ -607,5 +608,17 @@ class GameController extends _$GameController {
       newGrid[y][x] = GridCell(terrainType: traversable ? TerrainType.grass : TerrainType.wall);
       state = state.copyWith(grid: newGrid);
     }
+  }
+
+  void equipItem(Equipment item) {
+    final player = state.characters.first;
+    final newEquipment = Map<EquipmentSlot, Equipment>.from(player.equipment);
+    newEquipment[item.slot] = item;
+
+    final newPlayer = player.copyWith(equipment: newEquipment);
+    final newCharacters = List<GameCharacter>.from(state.characters);
+    newCharacters[0] = newPlayer;
+
+    state = state.copyWith(characters: newCharacters);
   }
 }
